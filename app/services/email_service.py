@@ -73,9 +73,9 @@ async def send_set_password_email(to: str, token: str, *, reset: bool) -> None:
     link = f"{settings.app_base_url.rstrip('/')}/#/set-password?token={token}"
     hours = settings.reset_link_ttl_hours if reset else settings.signup_link_ttl_hours
     if reset:
-        subject, lead = "Reset your Brain Monkey password", "Choose a new password for Brain Monkey."
+        subject, lead = "Reset your Monkey Brain password", "Choose a new password for Monkey Brain."
     else:
-        subject, lead = "Finish setting up Brain Monkey", "Confirm your email and choose a password to start training."
+        subject, lead = "Finish setting up Monkey Brain", "Confirm your email and choose a password to start training."
     text = f"{lead}\n{link}\n\nThis link works once and expires in {hours} hour(s). If this wasn't you, ignore this email."
     body = (
         f"<p>{html.escape(lead)}</p>"

@@ -33,7 +33,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="Brain Monkey", lifespan=lifespan,
+    title="Monkey Brain", lifespan=lifespan,
     docs_url=None if settings.env == "production" else "/docs",
     redoc_url=None, openapi_url=None if settings.env == "production" else "/openapi.json",
 )

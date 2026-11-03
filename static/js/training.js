@@ -22,7 +22,7 @@ export function trainView(root, ctx) {
   let tick = null;
   const stage = h("section", { class: "stage", "aria-live": "off" });
   const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
-  root.append(h("header", { class: "topbar" }, h("span", { class: "wordmark" }, tally(0), "Brain Monkey"),
+  root.append(h("header", { class: "topbar" }, h("span", { class: "wordmark" }, tally(0), "Monkey Brain"),
     h("nav", { class: "nav" }, h("a", { href: "#/dashboard" }, "Leave (progress is saved)"))), stage);
   const cleanup = () => { alive = false; clearInterval(tick); removeEventListener("beforeunload", warn); };
 

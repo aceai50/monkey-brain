@@ -32,7 +32,7 @@ function render() {
   if (!location.hash.startsWith(wanted)) history.replaceState(null, "", wanted + (PUBLIC.has(name) && qs ? "?" + qs : ""));
   root.replaceChildren();
   cleanup = views[name](root, { navigate, params: new URLSearchParams(qs || ""), arg }) || null;
-  document.title = "Brain Monkey";
+  document.title = "Monkey Brain";
   window.scrollTo(0, 0);
   const h1 = root.querySelector("h1");
   h1?.setAttribute("tabindex", "-1");

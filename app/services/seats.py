@@ -43,12 +43,12 @@ async def claim_for_signup(email: str) -> tuple[bool, str | None]:
     if invite is not None:
         return True, None  # the invite already held the seat
     if settings.registration_mode == "invite_only":
-        return False, "Brain Monkey is invite-only right now."
+        return False, "Monkey Brain is invite-only right now."
     res = await db.counters.find_one_and_update(
         {"_id": SEATS_ID, "used": {"$lt": settings.max_users}}, {"$inc": {"used": 1}}
     )
     if res is None:
-        return False, f"Brain Monkey is full. All {settings.max_users} early-access seats are taken."
+        return False, f"Monkey Brain is full. All {settings.max_users} early-access seats are taken."
     return True, None
 
 

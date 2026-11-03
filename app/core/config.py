@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     email_provider: Literal["brevo", "resend", "console"] = "console"
     email_from: str = "no-reply@example.com"
-    email_from_name: str = "Brain Monkey"
+    email_from_name: str = "Monkey Brain"
     brevo_api_key: str = ""
     resend_api_key: str = ""
 

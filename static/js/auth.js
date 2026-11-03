@@ -70,7 +70,7 @@ export function authView(root, ctx) {
     tally(0, true));
   const seatNote = h("p", { class: "muted small mono" });
   const card = h("section", { class: "auth-card panel", "aria-label": "Sign in" });
-  root.append(h("header", { class: "topbar" }, h("span", { class: "wordmark" }, tally(0), "Brain Monkey")), hero, card);
+  root.append(h("header", { class: "topbar" }, h("span", { class: "wordmark" }, tally(0), "Monkey Brain")), hero, card);
   playTally(hero);
   api("/api/auth/config", { auth: false }).then((c) => {
     cfg = c;
@@ -129,7 +129,7 @@ export function setPasswordView(root, ctx) {
   const pw2 = h("input", { class: "input", id: "pw2", type: "password", required: true, minlength: "8", maxlength: "72", autocomplete: "new-password" });
   const btn = h("button", { class: "btn btn--primary", type: "submit" }, "Save password");
   root.append(
-    h("header", { class: "topbar" }, h("span", { class: "wordmark" }, tally(0), "Brain Monkey")),
+    h("header", { class: "topbar" }, h("span", { class: "wordmark" }, tally(0), "Monkey Brain")),
     h("section", { class: "page-head" }, h("h1", {}, "Choose a password."), h("p", {}, "Opening this link confirmed your email. Pick a password and you're in.")),
     h("section", { class: "auth-card panel" }, token ? msg : notice("error", "This link is missing its token. Request a new one from the log in page."),
       token ? h("form", { onsubmit: async (e) => {
@@ -153,7 +153,7 @@ export function profileView(root, ctx) {
   const alias = h("input", { class: "input", id: "alias", maxlength: "20", required: true, autocomplete: "off", pattern: "[A-Za-z0-9_.\\-]{3,20}" });
   const btn = h("button", { class: "btn btn--primary", type: "submit" }, "Create profile");
   root.append(
-    h("header", { class: "topbar" }, h("span", { class: "wordmark" }, tally(0), "Brain Monkey"),
+    h("header", { class: "topbar" }, h("span", { class: "wordmark" }, tally(0), "Monkey Brain"),
       h("nav", { class: "nav" }, h("button", { type: "button", onclick: () => logout(ctx) }, "Log out"))),
     h("section", { class: "page-head" }, h("h1", {}, "Pick your name."), h("p", {}, "You only do this once. Your alias is what other people see on the leaderboard.")),
     h("section", { class: "auth-card panel" }, msg,

@@ -32,7 +32,7 @@ services:
       - key: EMAIL_FROM
         sync: false
       - key: EMAIL_FROM_NAME
-        value: Brain Monkey
+        value: Monkey Brain
       - key: BREVO_API_KEY
         sync: false
       - key: RESEND_API_KEY

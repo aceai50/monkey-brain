@@ -49,15 +49,33 @@ export const fmtClock = (sec) => {
 export function topbar(active, onLogout, user) {
   const link = (hash, label, key) =>
     h("a", { href: hash, "aria-current": active === key ? "page" : null }, label);
+  
+  const navContent = h("nav", { class: "nav", "aria-label": "Main" },
+    link("#/dashboard", "Dashboard", "dashboard"),
+    link("#/leaderboard", "Leaderboard", "leaderboard"),
+    link("#/customize", "Customize", "customize"),
+    link("#/settings", "Settings", "settings"),
+    user?.is_admin ? link("#/admin", "Admin", "admin") : null,
+    h("button", { type: "button", onclick: onLogout }, "Log out")
+  );
+
+  const toggleBtn = h("button", {
+    type: "button",
+    class: "nav-toggle",
+    "aria-expanded": "false",
+    "aria-label": "Toggle navigation",
+    onclick: () => {
+      const expanded = toggleBtn.getAttribute("aria-expanded") === "true";
+      toggleBtn.setAttribute("aria-expanded", String(!expanded));
+      navContent.classList.toggle("is-open", !expanded);
+    }
+  }, "Menu ▾");
+
   return h("header", { class: "topbar" },
-    h("a", { class: "wordmark", href: "#/dashboard" }, tally(0), "Brain Monkey"),
-    h("nav", { class: "nav", "aria-label": "Main" },
-      link("#/dashboard", "Dashboard", "dashboard"),
-      link("#/leaderboard", "Leaderboard", "leaderboard"),
-      link("#/customize", "Customize", "customize"),
-      link("#/settings", "Settings", "settings"),
-      user?.is_admin ? link("#/admin", "Admin", "admin") : null,
-      h("button", { type: "button", onclick: onLogout }, "Log out")));
+    h("a", { class: "wordmark", href: "#/dashboard" }, tally(0), "Monkey Brain"),
+    toggleBtn,
+    navContent
+  );
 }
 
 // Accessible on/off switch. `onChange(next)` must return a promise; if it rejects the switch snaps back.
