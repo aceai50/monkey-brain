@@ -89,9 +89,8 @@ a:hover { color: var(--accent); }
 @media (max-width: 768px) {
   .topbar { position: relative; flex-wrap: wrap; }
   .nav-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; }
-  .nav { display: none; width: 100%; flex-direction: column; gap: 0.25rem; background: var(--surface); border: var(--line); padding: 0.75rem; box-shadow: var(--shadow); margin-top: 0.5rem; }
-  .nav.is-open { display: flex; }
-  .nav a, .nav button { width: 100%; text-align: left; padding: 0.5rem 0.75rem; border: 1.5px solid transparent; }
+  .nav { display: flex; width: 100%; flex-direction: row; align-items: center; justify-content: space-between; background: var(--surface); border: var(--line); padding: 0.5rem 0.75rem; box-shadow: var(--shadow); margin-top: 0.5rem; }
+  .nav a, .nav button { width: auto; text-align: center; padding: 0.4rem 0.6rem; border: 1.5px solid transparent; }
   .nav a:hover, .nav button:hover { border-color: var(--text-main); }
   .nav a[aria-current="page"] { background: var(--text-main); color: var(--bg); }
 }
