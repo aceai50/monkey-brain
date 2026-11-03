@@ -1,4 +1,4 @@
-# Brain Monkey
+# Monkey Brain
 
 Five-pillar daily mental training: FastAPI + MongoDB Atlas + vanilla JS. Day boundary is **IST (UTC+5:30)**.
 
