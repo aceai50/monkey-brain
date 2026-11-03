@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: brain-monkey
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: TRUST_PROXY
+        value: "true"
+      - key: APP_BASE_URL
+        sync: false            # e.g. https://brain-monkey.onrender.com
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB
+        value: brain_monkey
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_EMAILS
+        sync: false            # your email; comma-separate for more than one
+      - key: MAX_USERS
+        value: "100"
+      - key: REGISTRATION_MODE
+        value: open            # or invite_only
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: EMAIL_PROVIDER
+        value: brevo           # or resend
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_FROM_NAME
+        value: Brain Monkey
+      - key: BREVO_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash        # verify current model names in Google AI Studio
+      - key: GEMINI_SOLVER_MODEL
+        value: gemini-2.5-flash-lite
+      - key: INTERNAL_CRON_SECRET
+        generateValue: true

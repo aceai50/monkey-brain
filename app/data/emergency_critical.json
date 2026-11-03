@@ -1,0 +1,270 @@
+{
+ "easy": [
+  {
+   "scenario": "A café owner notices ice-cream sales and sunburn cases both rise in July. She concludes that eating ice cream causes sunburn.",
+   "question": "What is the flaw?",
+   "options": [
+    "She confuses correlation with causation; hot weather drives both",
+    "Ice cream contains too much sugar",
+    "The sample is too small",
+    "Sunburn is not measurable"
+   ],
+   "correct_index": 0,
+   "explanation": "A shared cause (sunny, hot weather) explains both trends. Neither causes the other.",
+   "tag": "Correlation vs causation"
+  },
+  {
+   "scenario": "Sam says, 'You can't trust Priya's budget proposal. She was late to work twice this month.'",
+   "question": "Which fallacy is this?",
+   "options": [
+    "Ad hominem: attacking the person, not the proposal",
+    "Straw man",
+    "False dilemma",
+    "Appeal to authority"
+   ],
+   "correct_index": 0,
+   "explanation": "Lateness says nothing about whether the numbers in the budget are right.",
+   "tag": "Ad hominem"
+  },
+  {
+   "scenario": "After two rude drivers in a row, Dev announces that everyone in this city drives badly.",
+   "question": "What is the flaw?",
+   "options": [
+    "Hasty generalisation from two cases",
+    "Circular reasoning",
+    "Slippery slope",
+    "Sunk cost"
+   ],
+   "correct_index": 0,
+   "explanation": "Two observations are far too few to describe a whole city.",
+   "tag": "Hasty generalisation"
+  },
+  {
+   "scenario": "A shop says: 'Nine out of ten dentists we asked prefer our toothpaste, so it is the best.' It surveyed only dentists it pays.",
+   "question": "What weakens the claim most?",
+   "options": [
+    "The sample is biased by the shop's own relationship with the dentists",
+    "Dentists dislike toothpaste",
+    "Ten is an even number",
+    "Toothpaste cannot be ranked"
+   ],
+   "correct_index": 0,
+   "explanation": "People paid by the shop are not a neutral sample.",
+   "tag": "Selection bias"
+  },
+  {
+   "scenario": "Mina has watched a movie for an hour and hates it, but keeps watching because 'I already spent an hour on it.'",
+   "question": "Which bias is at work?",
+   "options": [
+    "Sunk cost fallacy",
+    "Anchoring",
+    "Survivorship bias",
+    "Base-rate neglect"
+   ],
+   "correct_index": 0,
+   "explanation": "The past hour is gone either way; only the future time matters.",
+   "tag": "Sunk cost"
+  }
+ ],
+ "medium": [
+  {
+   "scenario": "A startup studies the ten most successful companies and finds all of them took big risks. It advises: 'Take big risks to succeed.' The study ignored companies that took big risks and failed.",
+   "question": "What is the main flaw?",
+   "options": [
+    "Survivorship bias: failures were left out",
+    "Confirmation bias in the founders",
+    "False dilemma",
+    "Appeal to tradition"
+   ],
+   "correct_index": 0,
+   "explanation": "Looking only at winners hides how many risk-takers failed.",
+   "tag": "Survivorship bias"
+  },
+  {
+   "scenario": "A manager says: 'Either we cut every training budget, or the company goes bankrupt.' No other options were considered.",
+   "question": "Which fallacy is this?",
+   "options": [
+    "False dilemma",
+    "Straw man",
+    "Equivocation",
+    "Post hoc"
+   ],
+   "correct_index": 0,
+   "explanation": "It presents two options when many others (e.g. partial cuts, new revenue) exist.",
+   "tag": "False dilemma"
+  },
+  {
+   "scenario": "A coach praises a player after a record-breaking game and scolds him after a terrible one. Next games are closer to average each time. The coach concludes scolding works and praise backfires.",
+   "question": "What explains the pattern better?",
+   "options": [
+    "Regression to the mean",
+    "Placebo effect",
+    "Ad hominem",
+    "Anchoring"
+   ],
+   "correct_index": 0,
+   "explanation": "Extreme performances are usually followed by more typical ones regardless of feedback.",
+   "tag": "Regression to the mean"
+  },
+  {
+   "scenario": "Ravi reads three articles that agree with his view on a diet and ignores two that disagree, then says 'the evidence is overwhelming.'",
+   "question": "Which bias is this?",
+   "options": [
+    "Confirmation bias",
+    "Availability heuristic",
+    "Gambler's fallacy",
+    "Halo effect"
+   ],
+   "correct_index": 0,
+   "explanation": "He is selecting evidence that fits his belief.",
+   "tag": "Confirmation bias"
+  },
+  {
+   "scenario": "A city adds more police and crime drops the same month a big factory opens and unemployment falls. The mayor says the police caused the drop.",
+   "question": "What is the best criticism?",
+   "options": [
+    "A confounding factor (jobs) was not ruled out",
+    "Police cannot affect crime",
+    "The city is too large",
+    "Crime is always falling"
+   ],
+   "correct_index": 0,
+   "explanation": "Another change happened at the same time, so the cause is unclear.",
+   "tag": "Confounding variable"
+  }
+ ],
+ "hard": [
+  {
+   "scenario": "A hospital A treats mostly mild cases and hospital B mostly severe ones. Overall, A has a higher survival rate. But for mild cases and for severe cases separately, B has the higher rate.",
+   "question": "What is this phenomenon?",
+   "options": [
+    "Simpson's paradox",
+    "Regression to the mean",
+    "Survivorship bias",
+    "Gambler's fallacy"
+   ],
+   "correct_index": 0,
+   "explanation": "A trend reverses when groups are combined because case mix differs.",
+   "tag": "Simpson's paradox"
+  },
+  {
+   "scenario": "A test for a rare disease (1 in 10,000) is 99% accurate. A patient tests positive and is told 'there is a 99% chance you have it.'",
+   "question": "What is wrong?",
+   "options": [
+    "It ignores the base rate; most positives are false positives",
+    "The test is too accurate",
+    "The disease is too rare to test",
+    "Accuracy cannot be measured"
+   ],
+   "correct_index": 0,
+   "explanation": "With a very low prevalence, false positives outnumber true positives, so the real chance is far lower.",
+   "tag": "Base-rate neglect"
+  },
+  {
+   "scenario": "A teacher argues: 'This policy is good because experts say so, and experts say so because the policy is clearly good.'",
+   "question": "Which flaw is present?",
+   "options": [
+    "Circular reasoning",
+    "Equivocation",
+    "Hasty generalisation",
+    "Appeal to nature"
+   ],
+   "correct_index": 0,
+   "explanation": "The conclusion is used as its own support.",
+   "tag": "Circular reasoning"
+  },
+  {
+   "scenario": "A study finds each team member's average output is high, so a manager concludes the team as a whole will deliver the project fast. Coordination costs were ignored.",
+   "question": "Which fallacy is this?",
+   "options": [
+    "Composition: assuming the whole has the parts' properties",
+    "Division",
+    "Slippery slope",
+    "Anchoring"
+   ],
+   "correct_index": 0,
+   "explanation": "Good individual output does not guarantee good collective output.",
+   "tag": "Composition fallacy"
+  },
+  {
+   "scenario": "A gym finds members who use the sauna have lower stress scores and says the sauna reduces stress. Members who were already calm may simply prefer the sauna.",
+   "question": "What is the best criticism?",
+   "options": [
+    "Reverse causation or self-selection is possible",
+    "The sauna is too hot",
+    "Stress cannot be scored",
+    "Sample is too large"
+   ],
+   "correct_index": 0,
+   "explanation": "Calmer people may choose the sauna, so the arrow could point the other way.",
+   "tag": "Reverse causation"
+  }
+ ],
+ "expert": [
+  {
+   "scenario": "A drug trial reports a 50% relative risk reduction (from 2 in 1,000 to 1 in 1,000). A headline says 'Cuts risk in half!' and the company argues everyone should take it.",
+   "question": "Which is the most important missing information?",
+   "options": [
+    "The absolute risk reduction (1 in 1,000) and side-effect rates",
+    "The colour of the pill",
+    "The company's size",
+    "The trial's start date"
+   ],
+   "correct_index": 0,
+   "explanation": "A large relative change can be a tiny absolute benefit, which must be weighed against harms.",
+   "tag": "Relative vs absolute risk"
+  },
+  {
+   "scenario": "An investor reviews 200 funds and finds the top 10 beat the market for five years, then picks them. The next year they perform near average. He had not accounted for the 190 funds that were discarded after random streaks.",
+   "question": "What best explains this?",
+   "options": [
+    "Selecting winners after the fact exploits luck (data dredging)",
+    "Funds always fail after five years",
+    "Inflation",
+    "Anchoring on past price"
+   ],
+   "correct_index": 0,
+   "explanation": "Among many funds, some will beat the market by chance; past luck does not predict future results.",
+   "tag": "Multiple comparisons"
+  },
+  {
+   "scenario": "A company's average salary rises each year. A union says wages are stagnant for typical workers. Both statements are true because executive pay jumped.",
+   "question": "Which statistic best resolves the dispute?",
+   "options": [
+    "The median salary",
+    "The total payroll",
+    "The number of employees",
+    "The highest salary"
+   ],
+   "correct_index": 0,
+   "explanation": "The mean is pulled up by outliers; the median reflects the typical worker.",
+   "tag": "Mean vs median"
+  },
+  {
+   "scenario": "Policy A is argued for with: 'Opponents want chaos.' The opponents' actual position was a slower, phased rollout.",
+   "question": "Which fallacy is used?",
+   "options": [
+    "Straw man",
+    "Ad hominem",
+    "False cause",
+    "Appeal to ignorance"
+   ],
+   "correct_index": 0,
+   "explanation": "It attacks a distorted version of the opposing view.",
+   "tag": "Straw man"
+  },
+  {
+   "scenario": "Because no one has proven that a supplement is harmful, a vendor claims it is safe.",
+   "question": "What is the flaw?",
+   "options": [
+    "Appeal to ignorance: absence of proof is not proof of absence",
+    "Circular reasoning",
+    "Hasty generalisation",
+    "Equivocation"
+   ],
+   "correct_index": 0,
+   "explanation": "Lack of evidence of harm only shows it has not been tested or found yet.",
+   "tag": "Appeal to ignorance"
+  }
+ ]
+}

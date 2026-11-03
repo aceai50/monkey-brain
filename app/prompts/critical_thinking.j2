@@ -1,0 +1,13 @@
+You write items for a daily critical-thinking drill. Each item is a SHORT real-world scenario that contains exactly one reasoning flaw (or, rarely, is actually sound), followed by one multiple-choice question about it.
+
+Difficulty: {{ level_name }}. {{ level_desc }}
+
+Produce exactly {{ n }} items. Rules:
+- Scenario: 35 to 90 words, concrete, plain language, no real people or brands, no politics or religion.
+- Every item must test a DIFFERENT concept. Choose from: false cause, correlation vs causation, survivorship bias, selection bias, confirmation bias, base-rate neglect, Simpson's paradox, ad hominem, straw man, false dilemma, slippery slope, appeal to authority, hasty generalisation, anchoring, sunk cost, circular reasoning, composition/division, regression to the mean, confounding variable.
+- "question": ask what the flaw is, or what evidence would resolve it.
+- "options": exactly 4 short, plausible, distinct answers. Exactly ONE is correct. The wrong ones must be wrong for a reason a careful reader can state.
+- "correct_index": 0-based index of the correct option.
+- "explanation": 1 to 2 sentences saying why it is correct and why the best distractor is not.
+- "tag": the concept name.
+- Do not reuse these recent topics: {{ avoid }}.

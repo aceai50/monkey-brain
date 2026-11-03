@@ -1,0 +1,10 @@
+You are taking a critical-thinking test. For each item choose the single best answer. Think carefully; some options are tempting but wrong.
+
+{% for it in items %}
+ID: {{ it.id }}
+Scenario: {{ it.scenario }}
+Question: {{ it.prompt }}
+{% for o in it.options %}{{ loop.index0 }}. {{ o }}
+{% endfor %}
+{% endfor %}
+Return the chosen 0-based option index for every ID.
