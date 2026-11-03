@@ -79,39 +79,40 @@ async def public_config():
     }
 
 
-@router.post("/register", status_code=202)
-async def register(body: RegisterIn, request: Request, bg: BackgroundTasks):
-    """Email only. The password is chosen AFTER the emailed link is opened, so nobody can register
-    an address they don't own and pre-set the password (account pre-hijack)."""
+@router.post("/register", status_code=200)
+async def register(body: RegisterIn, request: Request, response: Response):
+    """Direct email and password registration without email verification codes."""
     email = body.email.lower()
     rate_limit("register-ip", client_ip(request), 8, 3600)
     rate_limit("register-email", email, 4, 3600)
     db = get_db()
     now = datetime.now(timezone.utc)
+    
     existing = await db.users.find_one({"email": email})
+    if existing is not None:
+        raise HTTPException(400, "Email already exists")
 
-    if existing is None:
-        counted, err = await seats.claim_for_signup(email)
-        if err:
-            raise HTTPException(403, err)
-        doc = {
-            "email": email, "email_verified": False, "display_on_leaderboard": True,
-            "created_at": now, "link_sent_at": now, "counted_seat": counted,
-        }
-        try:
-            doc["_id"] = (await db.users.insert_one(doc)).inserted_id
-        except DuplicateKeyError:
-            if counted:
-                await seats.release()
-            return {"message": GENERIC_MSG}
-        bg.add_task(send_set_password_email, email, _pwset_token(doc, reset=False), reset=False)
-    elif not existing.get("password_hash") and not existing.get("google_sub"):
-        last = existing.get("link_sent_at")
-        if not last or (now - last).total_seconds() >= LINK_COOLDOWN_S:
-            await db.users.update_one({"_id": existing["_id"]}, {"$set": {"link_sent_at": now}})
-            bg.add_task(send_set_password_email, email, _pwset_token(existing, reset=False), reset=False)
-    # Existing, set-up account: do nothing and say nothing (no account enumeration).
-    return {"message": GENERIC_MSG}
+    counted, err = await seats.claim_for_signup(email)
+    if err:
+        raise HTTPException(403, err)
+
+    password_hash = hash_password(body.password)
+    doc = {
+        "email": email,
+        "password_hash": password_hash,
+        "email_verified": True,
+        "display_on_leaderboard": True,
+        "created_at": now,
+        "counted_seat": counted,
+    }
+    try:
+        doc["_id"] = (await db.users.insert_one(doc)).inserted_id
+    except DuplicateKeyError:
+        if counted:
+            await seats.release()
+        raise HTTPException(400, "Email already exists")
+
+    return await _issue_session(doc, response)
 
 
 @router.post("/forgot-password", status_code=202)

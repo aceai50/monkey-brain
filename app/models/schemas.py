@@ -40,7 +40,7 @@ class PasswordMixin(BaseModel):
         return v
 
 
-class RegisterIn(BaseModel):
+class RegisterIn(PasswordMixin):
     email: EmailStr
 
 

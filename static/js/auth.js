@@ -90,18 +90,29 @@ export function authView(root, ctx) {
         h("button", { type: "button", role: "tab", "aria-selected": String(mode === m), onclick: () => { mode = m; draw(); } }, label)));
 
     let body;
-    if (mode === "register" || mode === "forgot") {
-      const forgot = mode === "forgot";
+    if (mode === "register") {
+      const pw = h("input", { class: "input", id: "pw", type: "password", required: true, minlength: "8", maxlength: "72", autocomplete: "new-password" });
+      const submit = h("button", { class: "btn btn--primary btn--block", type: "submit" }, "Sign up");
+      const form = h("form", { onsubmit: async (e) => {
+        e.preventDefault(); submit.disabled = true; msg.replaceChildren();
+        try { await afterLogin(await api("/api/auth/register", { method: "POST", body: { email: email.value, password: pw.value }, auth: false }), ctx); }
+        catch (err) { showError(err.message); } finally { submit.disabled = false; }
+      } },
+        h("div", { class: "field" }, h("label", { for: "email" }, "Email"), email),
+        h("div", { class: "field" }, h("label", { for: "pw" }, "Password"), pw, h("span", { class: "hint" }, "At least 8 characters.")),
+        submit);
+      body = [msg, form, seatNote];
+    } else if (mode === "forgot") {
       const { form, msg: m2 } = linkForm({
-        endpoint: forgot ? "/api/auth/forgot-password" : "/api/auth/register",
-        label: forgot ? "Email me a reset link" : "Email me a sign-up link",
-        sent: "Open the link, choose a password, then log in. Check spam if nothing shows up in a minute.",
+        endpoint: "/api/auth/forgot-password",
+        label: "Email me a reset link",
+        sent: "Open the link, choose a new password, then log in.",
         getEmail: () => email.value,
       });
       form.prepend(h("div", { class: "field" }, h("label", { for: "email" }, "Email"), email,
-        h("span", { class: "hint" }, forgot ? "We'll send a link that works once." : "You'll choose your password after you confirm this address.")));
+        h("span", { class: "hint" }, "We'll send a password reset link.")));
       body = [msg, m2, form, seatNote];
-      if (forgot) body.push(h("button", { type: "button", class: "link-btn", onclick: () => { mode = "login"; draw(); } }, "Back to log in"));
+      body.push(h("button", { type: "button", class: "link-btn", onclick: () => { mode = "login"; draw(); } }, "Back to log in"));
     } else {
       const pw = h("input", { class: "input", id: "pw", type: "password", required: true, maxlength: "72", autocomplete: "current-password" });
       const submit = h("button", { class: "btn btn--primary btn--block", type: "submit" }, "Log in");
