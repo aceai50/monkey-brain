@@ -96,7 +96,7 @@ async def register(body: RegisterIn, request: Request, response: Response):
     if err:
         raise HTTPException(403, err)
 
-    password_hash = hash_password(body.password)
+    password_hash = await hash_password(body.password)
     doc = {
         "email": email,
         "password_hash": password_hash,
