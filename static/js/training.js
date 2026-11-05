@@ -143,9 +143,9 @@ function report(stage, r, ctx) {
     h("td", { class: "mono" }, p.pillar === "kinesthetic" ? (p.avg_rt_ms ? `${p.avg_rt_ms}ms avg` : "-") : `${Math.round((p.accuracy || 0) * 100)}%`),
     h("td", {}, h("span", { class: "scorebar", role: "img", "aria-label": `${Math.round(p.score)} out of 100` }, h("span", { class: "scorebar__fill" }),
       h("span", { class: "scorebar__n mono" }, Math.round(p.score)))),
-    circuit ? h("td", { class: "mono" }, `x${p.weight.toFixed(2)}`) : null,
-    circuit ? h("td", { class: "mono" }, `x${p.volume.toFixed(2)}`) : null,
-    circuit ? h("td", { class: "mono" }, p.points) : null));
+    circuit ? h("td", { class: "mono" }, `x${p.weight?.toFixed(2) ?? "1.00"}`) : null,
+    circuit ? h("td", { class: "mono" }, `x${p.volume?.toFixed(2) ?? "1.00"}`) : null,
+    circuit ? h("td", { class: "mono" }, p.points ?? 0) : null));
   const head = ["Pillar", "Level", "Solved", "Accuracy", "Score"].concat(circuit ? ["Difficulty", "Volume", "Points"] : []);
   const reviews = r.pillars.find((p) => p.pillar === "critical")?.review || [];
   const arch = r.pillars.find((p) => p.pillar === "art")?.archetype;
