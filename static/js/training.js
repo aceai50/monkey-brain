@@ -63,7 +63,7 @@ export function trainView(root, ctx) {
 
 function intro(stage, pillar, doneCount, level, total, circuit) {
   return new Promise((resolve) => {
-    const [name, how] = TITLES[pillar];
+    const [name, how] = TITLES[pillar] || [pillar, ""];
     stage.replaceChildren(
       h("h1", {}, name), h("p", { class: "lede" }, how),
       h("p", { class: "mono muted" }, `${level} level. Four minutes. The clock starts after a short countdown.`),
