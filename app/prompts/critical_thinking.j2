@@ -3,10 +3,44 @@ You write items for a daily critical-thinking drill. Each item presents a realis
 Difficulty: {{ level_name }}. {{ level_desc }}
 
 Produce exactly {{ n }} items. Rules:
-- "scenario": 45 to 90 words describing a concrete real-world dilemma or situation involving a choice or action (e.g. time management, resource allocation, professional trade-off).
-- "question": ask what the most optimal course of action or decision should be (e.g. "What should [Name] do?").
-- "options": exactly 4 plausible choices (a, b, c, d) representing different actions. They should all sound plausible at first glance so the user has to think carefully.
+- "scenario": 45 to 90 words describing a concrete real-world dilemma or situation involving a choice or action.
+- "question": ask what the most optimal course of action or decision should be.
+- "options": exactly 4 plausible choices (a, b, c, d) representing different actions. They should all sound plausible at first glance so the user has to think carefully like a detective.
 - "correct_index": 0-based index of the single most optimal and correct option.
 - "explanation": 1 to 2 sentences explaining why this option is the best choice and why the other options are suboptimal or flawed.
 - "tag": the core reasoning or decision-making concept tested.
 - Do not reuse these recent topics: {{ avoid }}.
+
+Example format (JSON):
+[
+  {
+    "scenario": "Dr. Vance notices that emergency room admissions for severe asthma spike every Tuesday evening in a specific industrial neighborhood, coinciding precisely with the weekly shift change at the local chemical refinery. Plant executives insist their emissions standards are fully compliant and blame regional pollen counts, pointing out that regional pollen counts also peak on Tuesdays.",
+    "question": "What is the most rigorous investigative move Dr. Vance should make next?",
+    "options": [
+      "Accept the refinery's compliance report at face value and advise patients to stay indoors on Tuesdays.",
+      "Immediately petition the city council to shut down the refinery without gathering air quality data.",
+      "Analyze localized particulate matter sensors downwind from the plant specifically during Tuesday shift changes while cross-referencing daily pollen indices.",
+      "Survey patients about their dietary habits to see if Tuesday night meals trigger asthma."
+    ],
+    "correct_index": 2,
+    "explanation": "True investigative reasoning requires isolating confounding variables through empirical downwind sensor data rather than relying on corporate assurances.",
+    "tag": "Confounding variable isolation"
+  }
+]
+
+Example format (JSON):
+[
+  {
+    "scenario": "Dr. Vance notices that emergency room admissions for severe asthma spike every Tuesday evening in a specific industrial neighborhood, coinciding precisely with the weekly shift change at the local chemical refinery. Plant executives insist their emissions standards are fully compliant and blame regional pollen counts, pointing out that regional pollen counts also peak on Tuesdays.",
+    "question": "What is the most rigorous investigative move Dr. Vance should make next?",
+    "options": [
+      "Accept the refinery's compliance report at face value and advise patients to stay indoors on Tuesdays.",
+      "Immediately petition the city council to shut down the refinery without gathering air quality data.",
+      "Analyze localized particulate matter sensors downwind from the plant specifically during Tuesday shift changes while cross-referencing daily pollen indices.",
+      "Survey patients about their dietary habits to see if Tuesday night meals trigger asthma."
+    ],
+    "correct_index": 2,
+    "explanation": "True investigative reasoning requires isolating confounding variables through empirical downwind sensor data rather than relying on corporate assurances.",
+    "tag": "Confounding variable isolation"
+  }
+]
