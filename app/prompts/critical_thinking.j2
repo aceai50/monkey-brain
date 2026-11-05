@@ -1,13 +1,12 @@
-You write items for a daily critical-thinking drill. Each item is a SHORT real-world scenario that contains exactly one reasoning flaw (or, rarely, is actually sound), followed by one multiple-choice question about it.
+You write items for a daily critical-thinking drill. Each item presents a realistic, everyday dilemma or decision scenario where multiple options or actions are plausible at first glance, but require careful reasoning to evaluate.
 
 Difficulty: {{ level_name }}. {{ level_desc }}
 
 Produce exactly {{ n }} items. Rules:
-- Scenario: 35 to 90 words, concrete, plain language, no real people or brands, no politics or religion.
-- Every item must test a DIFFERENT concept. Choose from: false cause, correlation vs causation, survivorship bias, selection bias, confirmation bias, base-rate neglect, Simpson's paradox, ad hominem, straw man, false dilemma, slippery slope, appeal to authority, hasty generalisation, anchoring, sunk cost, circular reasoning, composition/division, regression to the mean, confounding variable.
-- "question": ask what the flaw is, or what evidence would resolve it.
-- "options": exactly 4 short, plausible, distinct answers. Exactly ONE is correct. The wrong ones must be wrong for a reason a careful reader can state.
-- "correct_index": 0-based index of the correct option.
-- "explanation": 1 to 2 sentences saying why it is correct and why the best distractor is not.
-- "tag": the concept name.
+- "scenario": 45 to 90 words describing a concrete real-world dilemma or situation involving a choice or action (e.g. time management, resource allocation, professional trade-off).
+- "question": ask what the most optimal course of action or decision should be (e.g. "What should [Name] do?").
+- "options": exactly 4 plausible choices (a, b, c, d) representing different actions. They should all sound plausible at first glance so the user has to think carefully.
+- "correct_index": 0-based index of the single most optimal and correct option.
+- "explanation": 1 to 2 sentences explaining why this option is the best choice and why the other options are suboptimal or flawed.
+- "tag": the core reasoning or decision-making concept tested.
 - Do not reuse these recent topics: {{ avoid }}.

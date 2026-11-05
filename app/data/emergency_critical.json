@@ -1,17 +1,17 @@
 {
  "easy": [
   {
-   "scenario": "A café owner notices ice-cream sales and sunburn cases both rise in July. She concludes that eating ice cream causes sunburn.",
-   "question": "What is the flaw?",
+   "scenario": "Gary has homework due this weekend and it is already Wednesday, but his friends call him out for a gaming night.",
+   "question": "What should Gary do?",
    "options": [
-    "She confuses correlation with causation; hot weather drives both",
-    "Ice cream contains too much sugar",
-    "The sample is too small",
-    "Sunburn is not measurable"
+    "Prioritise homework and ignore friends entirely",
+    "Go hang out with friends and forget about the homework",
+    "Make a plan, evaluate the workload, and see if tasks can be done without sacrificing time with friends",
+    "Ask the professor for an indefinite extension immediately"
    ],
-   "correct_index": 0,
-   "explanation": "A shared cause (sunny, hot weather) explains both trends. Neither causes the other.",
-   "tag": "Correlation vs causation"
+   "correct_index": 2,
+   "explanation": "Evaluating workload and planning allows balancing social connection with academic responsibility rather than taking extreme approaches.",
+   "tag": "Time management"
   },
   {
    "scenario": "Sam says, 'You can't trust Priya's budget proposal. She was late to work twice this month.'",
