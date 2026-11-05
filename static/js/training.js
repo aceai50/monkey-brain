@@ -160,10 +160,10 @@ function report(stage, r, ctx) {
     flagged.length ? notice("error", "Some results were zeroed: " + flagged.map((p) => `${TITLES[p.pillar][0]} (${p.flags.join(", ").replace(/_/g, " ")})`).join("; ")) : null,
     reviews.length ? h("div", { class: "reviews" }, h("h2", {}, "Critical thinking review"), ...reviews.map((q) =>
       h("details", { class: "review" + (q.correct ? " is-right" : " is-wrong") },
-        h("summary", {}, (q.correct ? "Right: " : "Missed: ") + q.prompt),
-        h("p", {}, q.scenario),
-        h("p", { class: "mono small" }, `Your answer: ${q.your ?? "none"}`), h("p", { class: "mono small" }, `Best answer: ${q.right}`),
-        h("p", {}, q.explanation)))) : null,
+        h("summary", {}, (q.correct ? "Right: " : "Missed: ") + (q.prompt || "")),
+        h("p", {}, q.scenario || ""),
+        h("p", { class: "mono small" }, `Your answer: ${q.your ?? "none"}`), h("p", { class: "mono small" }, `Best answer: ${q.right || ""}`),
+        h("p", {}, q.explanation || "")))) : null,
     h("div", { class: "row-actions" },
       h("a", { class: "btn btn--primary", href: "#/dashboard" }, "Back to dashboard"),
       circuit ? h("a", { class: "btn", href: "#/leaderboard" }, "See the leaderboard") : null));
