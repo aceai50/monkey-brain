@@ -63,11 +63,13 @@ def score_questions(pillar: str, questions: list[dict], answers: dict) -> dict:
         r["answered"] += 1
         r["correct" if ok else "wrong"] += 1
         if pillar == "critical":
-            opts = q["options"]
+            opts = q.get("options") or []
+            ans_idx = q.get("answer")
+            right_text = opts[ans_idx] if isinstance(ans_idx, int) and 0 <= ans_idx < len(opts) else ""
             r["review"].append({
-                "scenario": q["scenario"], "prompt": q["prompt"], "correct": ok,
+                "scenario": q.get("scenario", ""), "prompt": q.get("prompt", ""), "correct": ok,
                 "your": opts[int(given)] if str(given).lstrip("-").isdigit() and 0 <= int(given) < len(opts) else None,
-                "right": opts[q["answer"]], "explanation": q.get("explanation", ""),
+                "right": right_text, "explanation": q.get("explanation", ""),
             })
     net = max(0.0, r["correct"] - WRONG_PENALTY[pillar] * r["wrong"])
     return _finish(r, net)
