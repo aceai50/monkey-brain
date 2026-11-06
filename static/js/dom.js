@@ -59,6 +59,7 @@ export function topbar(active, onLogout, user) {
   const navContent = h("nav", { class: "nav", "aria-label": "Main" },
     link("#/dashboard", "Dashboard", "dashboard"),
     link("#/leaderboard", "Leaderboard", "leaderboard"),
+    link("#/history", "History", "history"),
     link("#/customize", "Customize", "customize"),
     link("#/settings", "Settings", "settings"),
     user?.is_admin ? link("#/admin", "Admin", "admin") : null,

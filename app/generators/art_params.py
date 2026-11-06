@@ -21,6 +21,15 @@ KEYWORDS = {
 }
 WORD_RE = re.compile(r"^[A-Za-z][A-Za-z '\-]{0,23}$")
 
+# Perspective-openers: each nudges a different way of looking, never naming a concrete answer.
+# Rotated across the set so all four lenses get represented in every session.
+HINTS = [
+    "Try squinting at it. Does the outline suggest something that grows, or something that was built?",
+    "Zoom out in your mind. Is this something you'd find in the sky, or in a machine?",
+    "Follow the lines with your eyes. Does the shape feel like it's moving, or locked still?",
+    "Look for faces. Does anything in the curves seem to be looking back at you?",
+]
+
 
 def clean_word(w) -> str | None:
     if not isinstance(w, str):
@@ -46,6 +55,7 @@ def validate_params(p: dict) -> bool:
 
 def generate(bucket: int, count: int, seed: str) -> list[dict]:
     rng = HashRng("art", bucket, seed)
+    offset = rng.randint(0, len(HINTS) - 1)
     out = []
     for k in range(count):
         kind = rng.choice(KINDS)
@@ -58,5 +68,5 @@ def generate(bucket: int, count: int, seed: str) -> list[dict]:
         p = {"kind": kind, "a": a, "b": b, "c": c, "phase": round(rng.random() * 3.14, 2),
              "layers": 1 + bucket, "rotate": rng.randint(0, 359)}
         out.append({"id": f"ap{bucket}-{k}", "type": "illusion", "prompt": "What is the first thing you see?",
-                    "params": p, "answer": None})
+                    "hint": HINTS[(k + offset) % len(HINTS)], "params": p, "answer": None})
     return out

@@ -301,6 +301,50 @@ async def _practice_effects(s: dict, user: dict) -> None:
     await get_db().users.update_one({"_id": user["_id"]}, upd)
 
 
+# ---------------------------------------------------------------- history
+HISTORY_WINDOW = 30
+HISTORY_PAGE_MAX = 366
+
+
+def _finished_query(user: dict) -> dict:
+    return {"user_id": user["_id"], "mode": "circuit", "state": "finished", "report": {"$ne": None}}
+
+
+def _day_entry(s: dict) -> dict:
+    rep = s.get("report") or {}
+    return {
+        "date": s["date"], "difficulty": s.get("difficulty"),
+        "total_points": rep.get("total_points"), "level_avg": rep.get("level_avg"),
+        "streak": rep.get("streak"),
+        "questions_solved": rep.get("questions_solved"), "questions_offered": rep.get("questions_offered"),
+        "pillars": rep.get("pillars", []),
+    }
+
+
+async def history(user: dict, days: int, before: str | None, limit: int, include_archived: bool) -> dict:
+    """Finished circuits, newest day first. Default window is the last `days` (30) IST days;
+    anything older is 'archived' and only returned when include_archived is set."""
+    days = max(1, min(days, 365))
+    limit = max(1, min(limit, HISTORY_PAGE_MAX))
+    floor = shift_date(today_ist(), -(days - 1))
+    q = _finished_query(user)
+    if before:
+        q["date"] = {"$lt": before} if include_archived else {"$lt": before, "$gte": floor}
+    elif not include_archived:
+        q["date"] = {"$gte": floor}
+    rows = await get_db().sessions.find(q).sort("date", -1).to_list(limit)
+    entries = [_day_entry(s) for s in rows]
+    archived_days = 0
+    if not include_archived:
+        archived_days = await get_db().sessions.count_documents({**_finished_query(user), "date": {"$lt": floor}})
+    return {
+        "window_days": days, "include_archived": include_archived,
+        "entries": entries,
+        "next_before": entries[-1]["date"] if len(rows) >= limit else None,
+        "archived_days": archived_days,
+    }
+
+
 # ---------------------------------------------------------------- dashboard
 async def dashboard(user: dict) -> dict:
     db = get_db()

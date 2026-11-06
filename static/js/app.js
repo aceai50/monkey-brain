@@ -4,13 +4,14 @@ import { customizeView } from "./customize.js";
 import { dashboardView, settingsView } from "./dashboard.js";
 import { toast } from "./dom.js";
 import { adminView } from "./admin.js";
+import { historyView } from "./history.js";
 import { leaderboardView } from "./leaderboard.js";
 import { trainView } from "./training.js";
 
 const root = document.getElementById("app");
 const views = {
   login: authView, "set-password": setPasswordView, profile: profileView, dashboard: dashboardView,
-  settings: settingsView, leaderboard: leaderboardView, customize: customizeView, train: trainView, admin: adminView,
+  settings: settingsView, leaderboard: leaderboardView, history: historyView, customize: customizeView, train: trainView, admin: adminView,
 };
 const PUBLIC = new Set(["login", "set-password"]);
 let cleanup = null;

@@ -49,16 +49,23 @@ export function mount(box, qs, { onDone }) {
   const canvas = h("canvas", { class: "art-canvas", role: "img", "aria-label": "An abstract curve. Describe what you see." });
   const word = h("input", { class: "input", id: "word", maxlength: "24", autocomplete: "off", "aria-label": "One word for what you see" });
   const count = h("p", { class: "mono muted" });
+  const hintBtn = h("button", { class: "link-btn", type: "button" }, "Hint");
+  const hintText = h("p", { class: "art-hint muted small" });
+  hintBtn.addEventListener("click", () => { hintText.hidden = !hintText.hidden; });
   const next = () => { const w = word.value.trim(); if (w) answers[qs[i].id] = w; i++; word.value = ""; show(); };
   word.addEventListener("keydown", (e) => { if (e.key === "Enter") next(); });
-  box.append(count, canvas, h("div", { class: "row-actions" }, word,
-    h("button", { class: "btn btn--primary", type: "button", onclick: next }, "Next"),
-    h("button", { class: "link-btn", type: "button", onclick: () => { word.value = ""; next(); } }, "I see nothing")),
+  box.append(count, canvas, h("div", { class: "row-actions" }, hintBtn, hintText),
+    h("div", { class: "row-actions" }, word,
+      h("button", { class: "btn btn--primary", type: "button", onclick: next }, "Next"),
+      h("button", { class: "link-btn", type: "button", onclick: () => { word.value = ""; next(); } }, "I see nothing")),
     h("p", { class: "muted small mono" }, "One word. First thing you saw. No wrong answers."));
   function show() {
     if (i >= qs.length) return onDone();
     count.textContent = `Image ${i + 1} of ${qs.length}`;
     draw(canvas, qs[i].params);
+    hintText.textContent = qs[i].hint || "";
+    hintText.hidden = true;
+    hintBtn.style.display = qs[i].hint ? "" : "none";
     word.focus();
   }
   requestAnimationFrame(show);

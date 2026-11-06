@@ -226,6 +226,7 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .cell { display: grid; place-items: center; min-width: 3.5rem; min-height: 3.5rem; padding: 0 0.6rem; border: var(--line); background: var(--surface); font-size: 1.5rem; font-weight: 700; }
 .cell.is-q { background: var(--accent); color: var(--on-accent); }
 .art-canvas { width: min(100%, 22rem); aspect-ratio: 1; border: var(--line); background: var(--surface); display: block; }
+.art-hint { max-width: 46ch; font-style: italic; }
 .arena { position: relative; min-height: 22rem; border: var(--line); background: var(--surface); display: grid; place-items: center; user-select: none; touch-action: manipulation; cursor: crosshair; outline-offset: 4px; }
 .arena.is-go { background: var(--accent); color: var(--on-accent); }
 .arena__msg { font-size: 1.5rem; font-weight: 700; pointer-events: none; }
@@ -288,3 +289,22 @@ table.report tr.is-me { background: color-mix(in srgb, var(--accent) 22%, var(--
 
 .gsi-slot { min-height: 44px; max-width: 100%; overflow: hidden; }
 .gsi-slot svg { width: 20px; height: 20px; max-width: 20px; }
+
+/* ---------- history / compare ---------- */
+.hist-tools { margin-bottom: 0.5rem; }
+.hist-day { margin-bottom: 0.25rem; }
+.hist-day > summary { display: flex; align-items: baseline; gap: 1rem; cursor: pointer; font-weight: 700; font-size: 1.0625rem; list-style: none; }
+.hist-day > summary::-webkit-details-marker { display: none; }
+.hist-day > summary::before { content: "+"; font: 500 1rem var(--font-mono); color: var(--text-muted); }
+.hist-day[open] > summary::before { content: "\2212"; }
+.hist-day[open] > summary { margin-bottom: 1rem; }
+.hist-day__pts { color: var(--accent); }
+.hist-day .reviews { margin-top: 1rem; }
+.hist-day .reviews h3 { margin-bottom: 0.5rem; }
+.cmp-pick { margin-bottom: 1.5rem; }
+.cmp-pick h3 { margin-bottom: 0.75rem; }
+.cmp-days { display: grid; gap: 0.35rem; max-height: 14rem; overflow: auto; border: var(--line); padding: 0.85rem; background: var(--bg); }
+.cmp-delta { margin-left: 0.5rem; font-size: 0.75rem; }
+.cmp-up { color: var(--accent); }
+.cmp-down { color: var(--text-main); }
+.cmp-total > * { border-top: var(--line); font-weight: 700; }

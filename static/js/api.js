@@ -55,3 +55,14 @@ export async function api(path, opts = {}) {
   if (!res.ok) throw new ApiError(res.status, data?.detail);
   return data;
 }
+
+// Same auth flow as api(), but returns the raw blob (for CSV/JSON downloads).
+export async function apiBlob(path) {
+  let res = await send(path, {});
+  if (res.status === 401) {
+    if (await refreshSession()) res = await send(path, {});
+    else if (onLost) onLost();
+  }
+  if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null)?.detail);
+  return res.blob();
+}
