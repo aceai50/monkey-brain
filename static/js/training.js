@@ -1,7 +1,7 @@
 // Training runner. The SERVER owns time: each set has a server deadline; this file only displays it
 // and submits when it hits zero (or when the player finishes early).
 import { api } from "./api.js";
-import { h, fmtClock, notice, sleep, tally } from "./dom.js";
+import { h, fmtClock, notice, render, sleep, tally } from "./dom.js";
 import * as arithmetic from "./games/arithmetic.js";
 import * as art from "./games/art.js";
 import * as critical from "./games/critical.js";
@@ -51,11 +51,11 @@ export function trainView(root, ctx) {
       removeEventListener("beforeunload", warn);
       s = await api(`/api/sessions/${ctx.arg}`);
       if (s.report) report(stage, s.report, ctx);
-      else stage.replaceChildren(notice("error", "Something went wrong finishing this session."), h("a", { class: "btn", href: "#/dashboard" }, "Back to dashboard"));
+      else render(stage, notice("error", "Something went wrong finishing this session."), h("a", { class: "btn", href: "#/dashboard" }, "Back to dashboard"));
     } catch (err) {
       if (!alive) return;
       removeEventListener("beforeunload", warn);
-      stage.replaceChildren(h("h1", {}, "Can't run this."), notice("error", err.message), h("a", { class: "btn", href: "#/dashboard" }, "Back to dashboard"));
+      render(stage, h("h1", {}, "Can't run this."), notice("error", err.message), h("a", { class: "btn", href: "#/dashboard" }, "Back to dashboard"));
     }
   })();
   return cleanup;
@@ -64,7 +64,7 @@ export function trainView(root, ctx) {
 function intro(stage, pillar, doneCount, level, total, circuit) {
   return new Promise((resolve) => {
     const [name, how] = TITLES[pillar] || [pillar, ""];
-    stage.replaceChildren(
+    render(stage,
       h("h1", {}, name), h("p", { class: "lede" }, how),
       h("p", { class: "mono muted" }, `${level} level. Four minutes. The clock starts after a short countdown.`),
       circuit ? tally(doneCount, true) : null,
@@ -76,7 +76,7 @@ function intro(stage, pillar, doneCount, level, total, circuit) {
 async function breakScreen(stage, seconds, nextPillar, doneCount, alive) {
   const [name, how] = TITLES[nextPillar];
   const clock = h("div", { class: "metric__value big" }, fmtClock(seconds));
-  stage.replaceChildren(h("h1", {}, "Breathe."), h("p", { class: "lede" }, "Drop your shoulders and unclench your jaw. Next up: " + name + "."),
+  render(stage, h("h1", {}, "Breathe."), h("p", { class: "lede" }, "Drop your shoulders and unclench your jaw. Next up: " + name + "."),
     tally(doneCount, true), clock, h("p", { class: "muted mono" }, how));
   const end = Date.now() + seconds * 1000;
   while (alive() && Date.now() < end) {
@@ -87,7 +87,7 @@ async function breakScreen(stage, seconds, nextPillar, doneCount, alive) {
 
 async function countIn(stage) {
   const n = h("div", { class: "countin", "aria-live": "assertive" });
-  stage.replaceChildren(n);
+  render(stage, n);
   for (const t of ["3", "2", "1"]) { n.textContent = t; await sleep(650); }
 }
 
@@ -102,7 +102,7 @@ function playSet(stage, res, doneCount, total, sid, index, alive, setTick) {
     const fill = h("span", { class: "timebar__fill" });
     const bar = h("div", { class: "timebar", role: "progressbar", "aria-label": "Time left", "aria-valuemin": "0", "aria-valuemax": "240" }, fill);
     const box = h("div", { class: "game" });
-    stage.replaceChildren(
+    render(stage,
       h("div", { class: "hud" }, h("h2", {}, name), tally(doneCount), clock), bar, box);
 
     let finished = false;
@@ -113,7 +113,7 @@ function playSet(stage, res, doneCount, total, sid, index, alive, setTick) {
       clearInterval(timer);
       const payload = game.collect();
       game.destroy();
-      stage.replaceChildren(h("p", { class: "lede" }, "Saving..."));
+      render(stage, h("p", { class: "lede" }, "Saving..."));
       for (let attempt = 0; attempt < 4; attempt++) {
         try { await api(`/api/sessions/${sid}/pillars/${index}/submit`, { method: "POST", body: payload }); break; }
         catch (e) { if (e.status === 409 || e.status === 404) break; await sleep(800); }   // 409: already closed by the server
@@ -150,7 +150,7 @@ function report(stage, r, ctx) {
   const reviews = r.pillars.find((p) => p.pillar === "critical")?.review || [];
   const arch = r.pillars.find((p) => p.pillar === "art")?.archetype;
   const flagged = r.pillars.filter((p) => p.flags?.length);
-  stage.replaceChildren(
+  render(stage,
     h("h1", {}, circuit ? `${r.total_points} points.` : "Set complete."),
     h("p", { class: "lede" }, circuit ? `${r.questions_solved} of ${r.questions_offered} questions solved. Day ${r.streak} of your streak. Average level: ${r.level_avg.toFixed(1)} of 3.` : "Practice doesn't score points or change your Auto level."),
     tally(r.pillars.length === 5 ? 5 : 0, true),

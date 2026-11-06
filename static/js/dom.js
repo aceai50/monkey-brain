@@ -16,6 +16,12 @@ export function h(tag, props = {}, ...kids) {
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// replaceChildren() coerces null/false args into the text "null". Filter them like h() does.
+export function render(el, ...kids) {
+  el.replaceChildren(...kids.flat().filter((k) => k != null && k !== false));
+  return el;
+}
 export const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export function tally(on = 0, large = false) {
