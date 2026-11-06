@@ -32,11 +32,20 @@ GEN_TIMEOUT_S = 240            # must stay below LOCK_TTL
 MAX_ATTEMPTS = 4
 MIN_KEPT = 4                   # items a bucket needs after blind-solve to count as a Gemini bucket
 ITEMS_PER_BUCKET = 8
+ART_ITEMS_PER_BUCKET = 6
+ART_MIN_KEPT = 3
+ART_STALE_OVERLAP = 0.4        # reject an item if >40% of its readings appeared yesterday
 LEVELS = [
     ("easy", "Everyday situations. The flaw is easy to spot for a beginner."),
     ("medium", "Workplace and news-style situations. One concept per item, moderately subtle."),
     ("hard", "Subtle flaws involving statistics or hidden assumptions."),
     ("expert", "Multi-step reasoning: base rates, confounders, Simpson's paradox, absolute vs relative risk."),
+]
+ART_LEVELS = [
+    ("easy", "Simple, legible shapes: low petal counts, layers 1, the reading is fairly open."),
+    ("medium", "More crossings and overlays: layers 2, the shape hides a bit."),
+    ("hard", "Dense overlays: layers 3, several genuinely competing readings."),
+    ("expert", "Very dense: layers 4, the shape hides well and viewers split widely."),
 ]
 _BANK = json.loads((Path(__file__).resolve().parent.parent / "data" / "emergency_critical.json").read_text("utf-8"))
 _inflight: set[str] = set()
@@ -99,10 +108,14 @@ async def resolve_pools(date: str) -> dict:
     """What a session reads. Never blocks on Gemini."""
     doc = await ensure_doc(date)
     pools = doc["pools"]
+    need_critical = "critical" not in pools
+    need_art = not doc.get("art_ready")
+    if gemini_service.available() and doc.get("attempts", 0) < MAX_ATTEMPTS and need_critical:
+        kick(date)
+    if gemini_service.available() and doc.get("art_attempts", 0) < MAX_ATTEMPTS and need_art:
+        kick(date)
     if "critical" in pools:
         return pools
-    if gemini_service.available() and doc.get("attempts", 0) < MAX_ATTEMPTS:
-        kick(date)
     fb, _ = await fallback_critical(date)
     return {**pools, "critical": fb}
 
@@ -121,6 +134,10 @@ async def _run(date: str) -> None:
         await generate_critical(date)
     except Exception:  # noqa: BLE001
         log.exception("critical generation crashed")
+    try:
+        await generate_art(date)
+    except Exception:  # noqa: BLE001
+        log.exception("art generation crashed")
     finally:
         _inflight.discard(date)
 
@@ -202,4 +219,85 @@ async def generate_critical(date: str) -> str:
             upd.update({"pools.critical": fb, "sources.critical": src, "status": "ready"})
         await col.update_one({"_id": date, "lock.owner": token}, {"$set": upd})
         log.warning("critical generation failed (%d/%d): %r", attempts, MAX_ATTEMPTS, e)
+        return "failed"
+
+
+# ---------------------------------------------------------------- art (Gemini curves)
+def _procedural_art(date: str) -> dict:
+    return {BUCKETS[b]: art_params.generate(b, POOL_SIZE["art"], f"{date}:art:{BUCKETS[b]}") for b in range(4)}
+
+
+async def _acquire_art(date: str, token: str) -> bool:
+    now = now_utc()
+    res = await get_db().daily_challenges.update_one(
+        {"_id": date, "art_ready": {"$ne": True}, "art_attempts": {"$lt": MAX_ATTEMPTS},
+         "$and": [{"$or": [{"art_lock": None}, {"art_lock.expires_at": {"$lt": now}}]},
+                  {"$or": [{"art_next_attempt_at": None}, {"art_next_attempt_at": {"$lte": now}}]}]},
+        {"$set": {"art_lock": {"owner": token, "expires_at": now + LOCK_TTL}}},
+    )
+    return res.modified_count == 1
+
+
+def _item_words(q: dict) -> set[str]:
+    return {w for ws in (q.get("readings") or {}).values() for w in ws}
+
+
+async def _gemini_art_pools(date: str, prev_meta: dict) -> tuple[dict, dict, dict]:
+    avoid = (prev_meta.get("readings") or [])[:60]
+    prev_words = set(prev_meta.get("readings") or [])
+    procedural = await run_in_threadpool(_procedural_art, date)
+    pools, sources, words = {}, {}, []
+    any_ok = False
+    for b, (name, desc) in enumerate(ART_LEVELS):
+        kept: list[dict] = []
+        try:
+            raws = await gemini_service.generate_art_items(name, desc, ART_ITEMS_PER_BUCKET, avoid)
+            seen: set[str] = set()
+            for r in raws:
+                q = art_params.validate_art_item(r, b, len(kept))
+                if q is None:
+                    continue
+                ws = _item_words(q)
+                if prev_words and len(ws & prev_words) / max(1, len(ws)) > ART_STALE_OVERLAP:
+                    continue   # too close to yesterday's answers -> not fresh
+                if ws & seen:
+                    continue
+                seen |= ws
+                kept.append(q)
+        except Exception as e:  # noqa: BLE001
+            log.warning("art bucket %s failed: %r", name, e)
+        if len(kept) >= ART_MIN_KEPT:
+            pools[name], sources[name] = kept, "gemini"
+            words.extend(sorted(ws for q in kept for ws in _item_words(q)))
+            any_ok = True
+        else:
+            pools[name], sources[name] = procedural[name], "procedural"
+    if not any_ok:
+        raise RuntimeError("no art bucket passed validation")
+    return pools, sources, {"readings": words[:200]}
+
+
+async def generate_art(date: str) -> str:
+    """Returns 'ready' | 'skipped' | 'failed'. Independent of critical: own lock, attempts, fallback."""
+    col = get_db().daily_challenges
+    await ensure_doc(date)
+    token = uuid.uuid4().hex
+    if not await _acquire_art(date, token):
+        return "skipped"
+    try:
+        prev = await col.find_one({"_id": shift_date(date, -1)}, {"art_meta": 1}) or {}
+        pools, sources, meta = await asyncio.wait_for(
+            _gemini_art_pools(date, prev.get("art_meta") or {}), timeout=GEN_TIMEOUT_S)
+        res = await col.update_one(   # fenced: only the current lock owner may publish
+            {"_id": date, "art_lock.owner": token},
+            {"$set": {"pools.art": pools, "sources.art": sources, "art_meta": meta, "art_ready": True,
+                      "updated_at": now_utc(), "art_last_error": None, "art_lock": None}})
+        return "ready" if res.modified_count else "skipped"
+    except Exception as e:  # noqa: BLE001
+        doc = await col.find_one({"_id": date}, {"art_attempts": 1}) or {}
+        attempts = doc.get("art_attempts", 0) + 1
+        upd = {"art_attempts": attempts, "art_last_error": repr(e)[:300], "art_lock": None,
+               "art_next_attempt_at": now_utc() + timedelta(minutes=15 * attempts)}
+        await col.update_one({"_id": date, "art_lock.owner": token}, {"$set": upd})
+        log.warning("art generation failed (%d/%d): %r", attempts, MAX_ATTEMPTS, e)
         return "failed"

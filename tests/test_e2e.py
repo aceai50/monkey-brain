@@ -31,11 +31,7 @@ async def client(monkeypatch):
 
 
 async def signup(c, email, alias=None, password="correct-horse-1"):
-    r = await c.post("/api/auth/register", json={"email": email})
-    assert r.status_code == 202, r.text
-    r = await c.post("/api/auth/set-password", json={"token": SENT[email], "password": password})
-    assert r.status_code == 200, r.text
-    r = await c.post("/api/auth/login", json={"email": email, "password": password})
+    r = await c.post("/api/auth/register", json={"email": email, "password": password})
     assert r.status_code == 200, r.text
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
     if alias:
@@ -110,7 +106,7 @@ async def test_user_cap_and_admin_controls(client):
     await signup(client, "u1@example.com", "user_one")
     await signup(client, "u2@example.com", "user_two")
     await signup(client, "u3@example.com", "user_three")      # 3 seats, admin exempt
-    r = await client.post("/api/auth/register", json={"email": "u4@example.com"})
+    r = await client.post("/api/auth/register", json={"email": "u4@example.com", "password": "correct-horse-1"})
     assert r.status_code == 403 and "full" in r.json()["detail"].lower()
     assert (await client.get("/api/auth/config")).json()["seats_left"] == 0
 
@@ -131,17 +127,23 @@ async def test_user_cap_and_admin_controls(client):
     # invites reserve a seat
     assert (await client.post("/api/admin/invites", json={"email": "vip@example.com"}, headers=admin)).status_code == 201
     assert (await client.get("/api/auth/config")).json()["seats_left"] == 0
-    assert (await client.post("/api/auth/register", json={"email": "vip@example.com"})).status_code == 202  # invitee gets in
-    assert (await client.post("/api/auth/register", json={"email": "rando@example.com"})).status_code == 403
+    assert (await client.post("/api/auth/register", json={"email": "vip@example.com", "password": "correct-horse-1"})).status_code == 200  # invitee gets in
+    assert (await client.post("/api/auth/register", json={"email": "rando@example.com", "password": "correct-horse-1"})).status_code == 403
 
 
-async def test_set_password_link_is_single_use_and_no_pre_hijack(client):
-    await client.post("/api/auth/register", json={"email": "v@example.com"})
+async def test_reset_link_is_single_use(client):
+    await signup(client, "v@example.com")
+    assert (await client.post("/api/auth/forgot-password", json={"email": "v@example.com"})).status_code == 202
     tok = SENT["v@example.com"]
-    # nobody can log in before the mailbox owner sets a password
-    assert (await client.post("/api/auth/login", json={"email": "v@example.com", "password": "whatever123"})).status_code == 401
     assert (await client.post("/api/auth/set-password", json={"token": tok, "password": "first-pass-1"})).status_code == 200
     assert (await client.post("/api/auth/set-password", json={"token": tok, "password": "attacker-pass"})).status_code == 400
+    assert (await client.post("/api/auth/login", json={"email": "v@example.com", "password": "first-pass-1"})).status_code == 200
+
+
+async def test_duplicate_register_says_email_exists(client):
+    await signup(client, "dup@example.com")
+    r = await client.post("/api/auth/register", json={"email": "dup@example.com", "password": "another-pass-1"})
+    assert r.status_code == 400 and "already exists" in r.json()["detail"]
 
 
 async def test_refresh_reuse_clears_cookie_and_sessions(client):

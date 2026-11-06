@@ -28,7 +28,7 @@ BREAK_SECONDS = 30
 GRACE_S = 8
 STALE_PRACTICE = timedelta(hours=2)
 TERMINAL = ("submitted", "expired")
-HIDDEN = {"answer", "explanation", "tag"}
+HIDDEN = {"answer", "explanation", "tag", "readings", "ambiguity_note"}
 DEFAULT_D = {p: 0.2 for p in PILLARS}
 
 
@@ -113,9 +113,9 @@ async def create_practice(user: dict, pillar: str, difficulty: str, slider: floa
     sid = ObjectId()
     level = slider_to_level(slider) if difficulty == "custom" else PICK_LEVEL[difficulty]
     n = counts_for(user)[pillar]
-    if pillar == "critical":
+    if pillar in ("critical", "art"):
         pools = await content.resolve_pools(today_ist())
-        questions = select_questions(n, level, pools["critical"])
+        questions = select_questions(n, level, pools[pillar])
     else:
         gen = content.GENERATORS[pillar]
         counts = {b: 0 for b in range(4)}

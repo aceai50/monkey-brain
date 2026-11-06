@@ -8,6 +8,7 @@ PyJWT>=2.8
 httpx>=0.27
 google-auth>=2.30
 requests>=2.32       # transport used by google-auth
-google-genai>=1.0    # Gemini (critical-thinking pool only)
+google-genai>=1.0    # Gemini (critical-thinking + art pools)
 jinja2>=3.1
+rapidfuzz>=3.9       # fuzzy matching for art answers
 # Pin exact versions (pip freeze) once the first deploy works.

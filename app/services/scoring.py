@@ -6,6 +6,8 @@ Three separate numbers come out of every pillar:
                   completion (attempted / offered). See _perf().
   points          score x difficulty multiplier x volume multiplier (circuit only).
 """
+from rapidfuzz import fuzz
+
 from app.generators.art_params import ARCHETYPES, classify_word, clean_word
 from app.generators.kinesthetic import BENCHMARK_MS
 from app.services.customize import volume_weight
@@ -75,17 +77,29 @@ def score_questions(pillar: str, questions: list[dict], answers: dict) -> dict:
     return _finish(r, net)
 
 
+def _match_lens(word: str, readings: dict | None) -> str | None:
+    """Fuzzy-match a free-form answer against the item's AI-generated readings."""
+    best, best_score = None, 0.0
+    for lens, words in (readings or {}).items():
+        for cand in words:
+            s = max(fuzz.partial_ratio(word, cand), fuzz.token_set_ratio(word, cand))
+            if s > best_score:
+                best, best_score = lens, s
+    return best if best_score >= 72 else None
+
+
 def score_art(questions: list[dict], answers: dict) -> dict:
     r = _empty("art", len(questions))
     tally: dict[str, int] = {}
-    ids = {q["id"] for q in questions}
+    by_id = {q["id"]: q for q in questions}
     for qid, w in answers.items():
-        if qid not in ids:
+        q = by_id.get(qid)
+        if q is None:
             continue
         word = clean_word(w)
         if word:
             r["answered"] += 1
-            key = classify_word(word)
+            key = _match_lens(word, q.get("readings")) or classify_word(word)
             tally[key] = tally.get(key, 0) + 1
     r["correct"] = r["answered"]          # art has no wrong answers
     _finish(r, float(r["answered"]))

@@ -4,7 +4,9 @@ import re
 
 from app.core.hashrng import HashRng
 
-KINDS = ("rose", "lissajous", "spiro")
+KINDS = ("rose", "lissajous", "spiro", "maurer", "super", "harm")
+NUM_KEYS = ("a", "b", "c", "d", "e", "phase")
+LENS = ("organic", "structural", "cosmic", "figure")
 
 ARCHETYPES = {
     "organic": ("The Pattern Gardener", "You read the shape as something growing or alive. You tend to see systems as ecosystems."),
@@ -19,7 +21,7 @@ KEYWORDS = {
     "cosmic": {"galaxy", "star", "planet", "orbit", "spiral", "universe", "vortex", "nebula", "atom", "wave", "ripple", "infinity"},
     "figure": {"face", "person", "eye", "bird", "elephant", "cat", "dog", "mask", "skull", "hand", "owl", "bear", "human", "monster"},
 }
-WORD_RE = re.compile(r"^[A-Za-z][A-Za-z '\-]{0,23}$")
+WORD_RE = re.compile(r"^[A-Za-z][A-Za-z '\-]{0,59}$")
 
 # Perspective-openers: each nudges a different way of looking, never naming a concrete answer.
 # Rotated across the set so all four lenses get represented in every session.
@@ -35,7 +37,9 @@ def clean_word(w) -> str | None:
     if not isinstance(w, str):
         return None
     w = " ".join(w.strip().split())
-    return w.lower() if WORD_RE.match(w) else None
+    if not WORD_RE.match(w) or len(w.split()) > 6:
+        return None
+    return w.lower()
 
 
 def classify_word(word: str) -> str:
@@ -47,10 +51,55 @@ def classify_word(word: str) -> str:
 
 
 def validate_params(p: dict) -> bool:
-    try:
-        return p["kind"] in KINDS and all(isinstance(p[k], (int, float)) and -50 <= p[k] <= 50 for k in ("a", "b", "c", "phase"))
-    except KeyError:
+    if p.get("kind") not in KINDS:
         return False
+    for k in NUM_KEYS:
+        v = p.get(k, 0)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not -50 <= v <= 50:
+            return False
+    if isinstance(p.get("layers", 1), bool) or not isinstance(p.get("layers", 1), int) or not 1 <= p["layers"] <= 5:
+        return False
+    return -360 <= p.get("rotate", 0) <= 360
+
+
+def validate_art_item(raw, bucket: int, key: int) -> dict | None:
+    """Gemini output -> question dict. Rejects unsafe params, thin or stale readings, named-answer hints."""
+    try:
+        p = {
+            "kind": str(raw.get("kind", "")).lower(),
+            "a": float(raw.get("a", 0)), "b": float(raw.get("b", 1)), "c": float(raw.get("c", 0)),
+            "d": float(raw.get("d", 0)), "e": float(raw.get("e", 0)), "phase": float(raw.get("phase", 0)),
+            "layers": max(1, min(5, int(raw.get("layers", 1)))), "rotate": int(raw.get("rotate", 0)) % 360,
+        }
+        if not validate_params(p) or p["b"] == 0:
+            return None
+        if p["kind"] == "super" and (p["b"] <= 0 or p["c"] <= 0 or p["d"] <= 0 or not 2 <= p["a"] <= 12):
+            return None
+        if p["kind"] == "harm" and not 0.005 <= p["e"] <= 0.5:
+            return None
+        readings = {}
+        for lens in LENS:
+            ws = raw.get("readings", {}).get(lens) or []
+            ws = [str(x).strip().lower() for x in ws if re.fullmatch(r"[A-Za-z][A-Za-z '\-]{0,30}", str(x).strip())]
+            readings[lens] = list(dict.fromkeys(ws))
+        good = {l: ws for l, ws in readings.items() if len(ws) >= 4}
+        if len(good) < 3:
+            return None
+        hint = str(raw.get("hint", "")).strip()
+        if not 10 <= len(hint) <= 160:
+            return None
+        flat = {w for ws in good.values() for w in ws}
+        hint_words = set(re.findall(r"[a-z]+", hint.lower()))
+        if hint_words & {w for ws in flat for w in ws.split()}:
+            return None
+        return {
+            "id": f"ai{bucket}-{key}", "type": "illusion",
+            "prompt": str(raw.get("prompt") or "What is the first thing you see?")[:120],
+            "hint": hint, "params": p, "readings": good,
+            "ambiguity_note": str(raw.get("ambiguity_note", "")).strip()[:200], "answer": None,
+        }
+    except (TypeError, ValueError):
+        return None
 
 
 def generate(bucket: int, count: int, seed: str) -> list[dict]:

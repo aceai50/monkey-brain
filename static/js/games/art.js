@@ -11,12 +11,32 @@ function points(p) {
     for (let i = 0; i <= N; i++) { const t = (i / N) * span; const r = Math.cos(k * t + p.phase); out.push([r * Math.cos(t), r * Math.sin(t)]); }
   } else if (p.kind === "lissajous") {
     for (let i = 0; i <= N; i++) { const t = (i / N) * TAU; out.push([Math.sin(p.a * t + p.phase), Math.sin(p.b * t)]); }
+  } else if (p.kind === "maurer") {
+    const k = p.a / p.b, step = (Math.abs(p.c) || 1) * Math.PI / 180;
+    for (let i = 0; i <= 720; i++) { const t = i * step; const r = Math.cos(k * t); out.push([r * Math.cos(t), r * Math.sin(t)]); }
+  } else if (p.kind === "super") {
+    const m = Math.min(12, Math.max(2, Math.round(p.a)));
+    const n1 = Math.min(10, Math.max(0.1, p.b)), n2 = Math.min(10, Math.max(0.1, p.c)), n3 = Math.min(10, Math.max(0.1, p.d));
+    for (let i = 0; i <= N; i++) {
+      const th = (i / N) * TAU;
+      const u = Math.pow(Math.pow(Math.abs(Math.cos(m * th / 4)), n2) + Math.pow(Math.abs(Math.sin(m * th / 4)), n3), -1 / n1);
+      const r = Math.min(5, u);
+      out.push([r * Math.cos(th), r * Math.sin(th)]);
+    }
+  } else if (p.kind === "harm") {
+    const d = Math.min(0.5, Math.max(0.005, Math.abs(p.e) || 0.05)), M = 1500;
+    for (let i = 0; i <= M; i++) {
+      const t = (i / M) * 60, e1 = Math.exp(-d * t), e2 = Math.exp(-d * 1.1 * t);
+      out.push([Math.sin(p.a * t + p.phase) * e1 + Math.sin(p.b * t) * e2,
+        Math.sin(p.c * t + p.phase / 2) * e1 + Math.sin(p.d * t) * e2]);
+    }
   } else {
-    const R = p.a, r = p.b, d = p.c, span = TAU * (r / gcd(R, r));
+    const R = Math.round(p.a) || 5, r = Math.round(p.b) || 2, d = p.c, span = TAU * (r / gcd(R, r));
     for (let i = 0; i <= N * 2; i++) { const t = (i / (N * 2)) * span; out.push([(R - r) * Math.cos(t) + d * Math.cos(((R - r) / r) * t), (R - r) * Math.sin(t) - d * Math.sin(((R - r) / r) * t)]); }
   }
-  const m = Math.max(...out.flat().map(Math.abs)) || 1;
-  return out.map(([x, y]) => [x / m, y / m]);
+  const finite = out.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+  const m = Math.max(...finite.flat().map(Math.abs)) || 1;
+  return finite.map(([x, y]) => [x / m, y / m]);
 }
 
 function draw(canvas, p) {
@@ -47,7 +67,7 @@ export function mount(box, qs, { onDone }) {
   const answers = {};
   let i = 0;
   const canvas = h("canvas", { class: "art-canvas", role: "img", "aria-label": "An abstract curve. Describe what you see." });
-  const word = h("input", { class: "input", id: "word", maxlength: "24", autocomplete: "off", "aria-label": "One word for what you see" });
+  const word = h("input", { class: "input", id: "word", maxlength: "60", autocomplete: "off", "aria-label": "One word or short phrase for what you see" });
   const count = h("p", { class: "mono muted" });
   const hintBtn = h("button", { class: "link-btn", type: "button" }, "Hint");
   const hintText = h("p", { class: "art-hint muted small" });

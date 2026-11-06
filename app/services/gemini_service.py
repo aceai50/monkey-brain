@@ -1,4 +1,4 @@
-"""Thin Gemini wrapper (google-genai SDK). Only critical thinking uses an LLM."""
+"""Thin Gemini wrapper (google-genai SDK). Used by the critical-thinking and art daily pools."""
 import asyncio
 import json
 import logging
@@ -35,6 +35,33 @@ class _Pick(BaseModel):
 
 class _Picks(BaseModel):
     answers: list[_Pick]
+
+
+class _ArtReadings(BaseModel):
+    organic: list[str]
+    structural: list[str]
+    cosmic: list[str]
+    figure: list[str]
+
+
+class _ArtItem(BaseModel):
+    kind: str
+    a: float
+    b: float
+    c: float = 0
+    d: float = 0
+    e: float = 0
+    phase: float = 0
+    layers: int = 1
+    rotate: int = 0
+    prompt: str = "What is the first thing you see?"
+    hint: str
+    readings: _ArtReadings
+    ambiguity_note: str
+
+
+class _ArtBatch(BaseModel):
+    items: list[_ArtItem]
 
 
 def available() -> bool:
@@ -74,6 +101,13 @@ async def generate_items(level_name: str, level_desc: str, n: int, avoid: list[s
     prompt = _env.get_template("critical_thinking.j2").render(
         level_name=level_name, level_desc=level_desc, n=n, avoid=", ".join(avoid) or "none")
     data = await _call(settings.gemini_model, prompt, _Batch, 0.9)
+    return data.get("items", [])
+
+
+async def generate_art_items(level_name: str, level_desc: str, n: int, avoid: list[str]) -> list[dict]:
+    prompt = _env.get_template("art_curves.j2").render(
+        level_name=level_name, level_desc=level_desc, n=n, avoid=", ".join(avoid) or "none")
+    data = await _call(settings.gemini_model, prompt, _ArtBatch, 1.0)
     return data.get("items", [])
 
 
