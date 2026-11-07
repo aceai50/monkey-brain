@@ -76,6 +76,7 @@ async def public_config():
         "seats_left": await seats.seats_left(),
         "max_users": settings.max_users,
         "invite_only": settings.registration_mode == "invite_only",
+        "s_mode_enabled": settings.s_mode_enabled,
     }
 
 

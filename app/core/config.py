@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     gemini_solver_model: str = "gemini-2.5-flash-lite"
     gemini_call_timeout_s: int = 60
     internal_cron_secret: str = ""
+    s_mode_enabled: bool = True
 
     @property
     def admin_set(self) -> frozenset[str]:

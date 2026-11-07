@@ -308,3 +308,64 @@ table.report tr.is-me { background: color-mix(in srgb, var(--accent) 22%, var(--
 .cmp-up { color: var(--accent); }
 .cmp-down { color: var(--text-main); }
 .cmp-total > * { border-top: var(--line); font-weight: 700; }
+
+/* ---------- S-mode theme ---------- */
+:root[data-s-mode] {
+  --bg: #08080b;
+  --surface: #121216;
+  --text-main: #f5f5f7;
+  --text-muted: #9a9aa5;
+  --accent: #ff2b4e;
+  --on-accent: #ffffff;
+  color-scheme: dark;
+}
+:root[data-s-mode] body { background-image: radial-gradient(circle at 50% -10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%); }
+
+.s-mode-gate { grid-column: 1 / -1; display: grid; justify-items: center; gap: 1.5rem; margin-top: 5rem; padding: clamp(4rem, 16vh, 8rem) 1rem; border-top: 1.5px dashed var(--text-muted); }
+.s-mode-gate h3 { letter-spacing: 0.5em; font-size: 0.8125rem; color: var(--text-muted); }
+.s-mode-gate .switch { width: 4.75rem; height: 2.5rem; }
+.s-mode-gate .switch__thumb { width: 1.8rem; }
+.s-mode-gate .switch[aria-checked="true"] .switch__thumb { transform: translateX(2.05rem); }
+
+.s-mode-loader { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; align-content: center; gap: 1.25rem; background: color-mix(in srgb, #050506 94%, transparent); color: #f5f5f7; }
+.hourglass { width: 44px; height: 64px; border: 2px solid #ff2b4e; position: relative; }
+.hourglass::after { content: ""; position: absolute; inset: 8px; transform-origin: top center; background: linear-gradient(#ff2b4e, transparent); animation: hourglass 1.5s ease-in-out infinite; }
+@keyframes hourglass { 0%, 100% { transform: scaleY(1); opacity: 0.85; } 50% { transform: scaleY(0.12); opacity: 1; } }
+.loadbar { width: min(16rem, 70vw); height: 6px; border: 1.5px solid #f5f5f7; }
+.loadbar span { display: block; height: 100%; width: 0; background: #ff2b4e; animation: loadbar 1.6s linear forwards; }
+@keyframes loadbar { to { width: 100%; } }
+
+.hist-section { display: flex; }
+.hist-section .segmented { width: max-content; }
+
+/* ---------- surveillance ---------- */
+.surv { max-width: 52rem; }
+.surv-top { justify-content: flex-end; }
+.dark-entry .lede { margin: 0.5rem 0 1rem; }
+.surv-card { display: grid; grid-template-columns: minmax(0, 9rem) 1fr; gap: 1.25rem; align-items: start; }
+.surv-face { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border: var(--line); background: var(--surface); filter: grayscale(1) contrast(1.05); }
+.surv-face--alt { display: grid; place-items: center; font: 700 2rem var(--font-mono); color: var(--text-muted); }
+.surv-secrets { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin: 0.9rem 0 0; }
+.surv-secrets dt { color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.surv-secrets dd { margin: 0; }
+.surv-found { color: var(--accent); }
+.surv-pips { display: flex; gap: 2rem; flex-wrap: wrap; }
+.surv-pips__row { display: flex; align-items: center; gap: 0.4rem; }
+.pip, .stall { width: 0.95rem; height: 1.15rem; border: var(--line); }
+.pip.is-on { background: var(--accent); }
+.stall.is-on { background: repeating-linear-gradient(135deg, var(--text-main) 0 3px, transparent 3px 6px); }
+.surv-chat { display: grid; gap: 0.6rem; padding: 1rem; border: var(--line); background: var(--surface); max-height: 22rem; overflow-y: auto; }
+.bubble { max-width: 85%; padding: 0.6rem 0.85rem; border: var(--line); font-size: 0.9375rem; }
+.bubble--them { justify-self: start; background: var(--bg); }
+.bubble--me { justify-self: end; background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.surv-options { display: grid; gap: 0.6rem; }
+.surv-option { justify-content: space-between; gap: 0.75rem; text-align: left; min-height: 3rem; }
+.surv-option__text { flex: 1; }
+.surv-option.is-locked { opacity: 0.35; }
+.surv-option.is-locked:hover { transform: none; box-shadow: var(--shadow); }
+.surv-tag { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); border: 1.5px solid var(--text-muted); padding: 0.1rem 0.35rem; }
+.surv-report { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 1rem; }
+@media (max-width: 44rem) {
+  .surv-card { grid-template-columns: 1fr; }
+  .surv-face { max-width: 12rem; }
+}

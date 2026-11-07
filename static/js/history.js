@@ -4,9 +4,10 @@ import { h, notice, render, toast, topbar } from "./dom.js";
 
 const PILLAR_LABEL = {
   arithmetic: "Arithmetic", critical: "Critical thinking", pattern: "Pattern recognition",
-  art: "Art and perspective", kinesthetic: "Reflexes",
+  art: "Art and perspective", kinesthetic: "Reflexes", surveillance: "Surveillance",
 };
-const PILLAR_ORDER = ["arithmetic", "critical", "pattern", "art", "kinesthetic"];
+const PILLAR_ORDER = ["arithmetic", "critical", "pattern", "art", "kinesthetic", "surveillance"];
+const OUTCOME_LABEL = { success: "mission successful", bored: "they got bored", burned: "burned out" };
 
 function segmented(name, options, value, onChange) {
   const wrap = h("div", { class: "segmented", role: "radiogroup", "aria-label": name });
@@ -29,15 +30,30 @@ export function historyView(root, ctx) {
   let archiveLoaded = false;
   let tab = "days";
   let metric = "score";
+  let mode = "circuit";
   let busy = true;
   const chosen = new Set();
 
   const tabs = h("div", { class: "auth-tabs", role: "tablist" });
+  const sectionBar = h("div", { class: "hist-section" });
   const body = h("div", { class: "hist-body" });
   root.append(topbar("history", () => logout(ctx), state.user),
     h("section", { class: "page-head" }, h("h1", {}, "History"),
       h("p", {}, "Every circuit you finished, day by day. The last 30 days load automatically; anything older stays archived until you ask for it.")),
-    h("section", { class: "board-wrap" }, tabs, body));
+    h("section", { class: "board-wrap" }, sectionBar, tabs, body));
+
+  function drawSectionBar() {
+    sectionBar.replaceChildren(segmented("Section", [["circuit", "Normal"], ["dark", "S-mode"]], mode, (v) => {
+      mode = v;
+      entries = [];
+      nextBefore = null;
+      archivedDays = 0;
+      archiveLoaded = false;
+      chosen.clear();
+      drawSectionBar();
+      loadMore();
+    }));
+  }
 
   function drawTabs() {
     tabs.replaceChildren(...[["days", "Previous scores"], ["compare", "Compare"]].map(([k, label]) =>
@@ -59,7 +75,7 @@ export function historyView(root, ctx) {
   async function loadMore(before) {
     busy = true;
     draw();
-    const qs = new URLSearchParams({ days: "30", limit: "10" });
+    const qs = new URLSearchParams({ days: "30", limit: "10", mode });
     if (archiveLoaded) qs.set("include_archived", "true");
     if (before) qs.set("before", before);
     try {
@@ -90,7 +106,8 @@ export function historyView(root, ctx) {
     return h("details", { class: "panel hist-day" },
       h("summary", {}, h("span", { class: "mono" }, e.date),
         h("span", { class: "hist-day__pts mono" }, `${e.total_points ?? 0} pts`),
-        h("span", { class: "muted small mono" }, e.difficulty || "")),
+        h("span", { class: "muted small mono" }, e.difficulty || ""),
+        e.outcome ? h("span", { class: "muted small mono" }, OUTCOME_LABEL[e.outcome] || e.outcome) : null),
       h("div", { class: "table-wrap" }, h("table", { class: "report" },
         h("thead", {}, h("tr", {}, ...head.map((c) => h("th", {}, c)))), h("tbody", {}, ...rows))),
       reviews.length ? h("div", { class: "reviews" }, h("h3", {}, "Critical thinking review"),
@@ -104,7 +121,7 @@ export function historyView(root, ctx) {
 
   async function download(fmt) {
     try {
-      const blob = await apiBlob(`/api/sessions/history/download?format=${fmt}&days=${archiveLoaded ? "all" : "30"}`);
+      const blob = await apiBlob(`/api/sessions/history/download?format=${fmt}&days=${archiveLoaded ? "all" : "30"}&mode=${mode}`);
       const url = URL.createObjectURL(blob);
       const a = h("a", { href: url, download: `monkey-brain-history.${fmt}` });
       document.body.append(a);
@@ -197,6 +214,7 @@ export function historyView(root, ctx) {
     if (tab === "days") drawDays(); else drawCompare();
   }
 
+  drawSectionBar();
   drawTabs();
   loadMore();
 }

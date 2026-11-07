@@ -1,6 +1,7 @@
 import { api } from "./api.js";
 import { logout, state } from "./auth.js";
 import { h, notice, switchToggle, tally, toast, topbar } from "./dom.js";
+import { enterSMode, exitSMode } from "./s-mode.js";
 
 const PILLARS = [
   ["arithmetic", "Arithmetic"], ["critical", "Critical thinking"], ["pattern", "Pattern recognition"],
@@ -30,6 +31,7 @@ export function dashboardView(root, ctx) {
     h("section", { class: "page-head" }, h("h1", {}, `Hey, ${first}.`),
       h("p", {}, "Today's circuit takes about 23 minutes: five sets of four minutes with thirty seconds to breathe in between.")),
     circuit, metrics, practice, privacy, mult);
+  sModeGate(root, ctx);
 
   let pick = "auto";
   async function start() {
@@ -199,5 +201,39 @@ export function settingsView(root, ctx) {
         u.has_password ? h("div", { class: "field" }, h("label", { for: "delpw" }, "Password"), delPw) : null,
         h("div", { class: "field" }, h("label", { for: "delconfirm" }, "Type DELETE to confirm"), delConfirm),
         delBtn)));
+}
+
+// The hidden door. Sits alone at the very bottom of the dashboard, no nav entry.
+function sModeGate(root, ctx) {
+  api("/api/auth/config", { auth: false }).then((cfg) => {
+    if (!cfg.s_mode_enabled) return;
+    const on = document.documentElement.hasAttribute("data-s-mode");
+    const sw = h("button", { type: "button", class: "switch", role: "switch",
+      "aria-checked": String(on), "aria-label": "S-mode" },
+      h("span", { class: "switch__track" }, h("span", { class: "switch__thumb" })));
+    sw.addEventListener("click", () => {
+      const next = sw.getAttribute("aria-checked") !== "true";
+      sw.setAttribute("aria-checked", String(next));
+      if (next) {
+        sModeLoading();
+        setTimeout(() => enterSMode(ctx), 1600);
+      } else {
+        exitSMode(ctx);
+      }
+    });
+    root.append(h("section", { class: "s-mode-gate" },
+      h("h3", { class: "mono" }, "S - M O D E"),
+      h("p", { class: "muted small" }, "There is another wing. It does not count toward your points."),
+      sw));
+  }).catch(() => {});
+}
+
+function sModeLoading() {
+  const el = h("div", { class: "s-mode-loader", role: "status", "aria-live": "assertive" },
+    h("div", { class: "hourglass" }),
+    h("div", { class: "loadbar" }, h("span")),
+    h("p", { class: "mono small" }, "Entering S-mode..."));
+  document.body.append(el);
+  setTimeout(() => el.remove(), 1800);
 }
 

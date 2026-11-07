@@ -7,15 +7,19 @@
   retries are harmless. Everything is scoped by user_id taken from the JWT (no IDOR).
 """
 from datetime import datetime, timedelta, timezone
+import uuid
 
 from bson import ObjectId
 from fastapi import HTTPException
+from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from app.core.clock import days_between, now_utc, shift_date, today_ist, yesterday_ist
 from app.core.db import get_db
+from app.core.hashrng import HashRng
 from app.core.security import to_object_id
 from app.generators import BUCKETS
+from app.generators.surveillance import SECRETS as DARK_SECRETS
 from app.services import content_orchestrator as content
 from app.services.adaptive_engine import (
     PICK_LEVEL, decay_for_absence, level_from_d, plan_buckets, slider_to_level, update_difficulty,
@@ -301,17 +305,189 @@ async def _practice_effects(s: dict, user: dict) -> None:
     await get_db().users.update_one({"_id": user["_id"]}, upd)
 
 
+# ---------------------------------------------------------------- dark sessions (S-mode)
+DARK_START_POINTS = 5
+DARK_MAX_STALLS = 3
+DARK_BUCKETS = ("easy", "medium", "hard")
+
+
+def _dark_order(seed: str, node: dict) -> list[int]:
+    return HashRng("surv", seed, node["id"]).shuffle(list(range(len(node["options"]))))
+
+
+def _dark_report(s: dict) -> dict:
+    d, ch = s["dark"], s["character"]
+    found = {k: bool(d["revealed"].get(k)) for k in DARK_SECRETS}
+    n_found = sum(found.values())
+    turns = max(1, d["turns"])
+    efficiency = max(0.0, 1 - d["wasted"] / turns)
+    score = round(100 * (0.5 * n_found / 3 + 0.3 * d["points"] / DARK_START_POINTS + 0.2 * efficiency))
+    style: dict[str, int] = {}
+    for entry in d["log"]:
+        style[entry["approach"]] = style.get(entry["approach"], 0) + 1
+    return {
+        "mode": "dark", "pillar": "surveillance", "outcome": d.get("outcome"),
+        "dark_points": score, "points_left": d["points"], "stalls": d["stalls"],
+        "turns": d["turns"], "wasted": d["wasted"], "found": found, "secrets": ch["secrets"],
+        "name": ch["name"], "personality": ch["personality"], "tone": ch["tone"],
+        "image_label": ch["image_label"], "style": style,
+        "responds_to": ch["responds_to"], "shuts_down_to": ch["shuts_down_to"], "log": d["log"],
+    }
+
+
+def dark_public(s: dict) -> dict:
+    "Client-safe dark state: outcomes, trait sheet and unmatched secrets stay server-side."
+    ch, d = s["character"], s["dark"]
+    out = {
+        "id": str(s["_id"]), "mode": "dark", "state": s["state"], "difficulty": s["difficulty"],
+        "outcome": d.get("outcome"), "name": ch["name"], "description": ch["description"],
+        "image_label": ch["image_label"], "tone": ch["tone"],
+        "image_url": s.get("image_url") or f"/static/img/faces/{ch['image_label']}.jpg",
+        "points": d["points"], "max_points": DARK_START_POINTS,
+        "stalls": d["stalls"], "max_stalls": DARK_MAX_STALLS,
+        "found": {k: bool(d["revealed"].get(k)) for k in DARK_SECRETS},
+        "secrets": {k: (ch["secrets"][k] if d["revealed"].get(k) else None) for k in DARK_SECRETS},
+        "messages": [m for entry in d["log"] for m in (
+            {"role": "character", "text": entry["text"]},
+            {"role": "player", "text": entry["chosen"]})],
+        "report": s.get("report") if s["state"] == "finished" else None,
+        "server_now": now_utc().isoformat(),
+    }
+    if s["state"] != "active":
+        out["node"] = None
+        return out
+    node = ch["nodes"][d["node_id"]]
+    locked = set(d["locked"].get(node["id"], []))
+    out["node"] = {
+        "id": node["id"], "text": node["text"],
+        "options": [{"key": str(i), "text": node["options"][i]["text"],
+                     "approach": node["options"][i]["approach"], "locked": i in locked}
+                    for i in d["order"][node["id"]]],
+    }
+    return out
+
+
+async def create_dark(user: dict, difficulty: str) -> dict:
+    """Start or resume a dark run: an active run is returned untouched (leave/resume)."""
+    db = get_db()
+    active = await db.sessions.find_one({"user_id": user["_id"], "mode": "dark", "state": "active"})
+    if active is not None:
+        return active
+    date = today_ist()
+    bucket = difficulty if difficulty in DARK_BUCKETS else "medium"
+    pool = await content.resolve_surveillance(date)
+    items = pool.get(bucket) or pool.get("medium") or []
+    if not items:
+        raise HTTPException(503, "No S-mode scenarios are available yet.")
+    seen = set(await db.sessions.distinct(
+        "character.image_label", {"user_id": user["_id"], "mode": "dark", "state": "finished"}))
+    fresh = [c for c in items if c["image_label"] not in seen] or items
+    runs = await db.sessions.count_documents({"user_id": user["_id"], "mode": "dark"})
+    ch = fresh[runs % len(fresh)]
+    face = await db.faces.find_one({"_id": ch["image_label"]})
+    image_url = (f"/static/img/faces/{face['filename']}" if face
+                 else f"/static/img/faces/{ch['image_label']}.jpg")
+    seed = uuid.uuid4().hex
+    doc = {
+        "_id": ObjectId(), "user_id": user["_id"], "date": date, "mode": "dark", "pillar": "surveillance",
+        "difficulty": bucket, "state": "active", "character": ch, "image_url": image_url,
+        "dark": {"node_id": ch["start"], "points": DARK_START_POINTS, "stalls": 0, "locked": {},
+                 "revealed": {}, "turns": 0, "wasted": 0, "outcome": None, "log": [],
+                 "attempt": runs + 1, "seed": seed,
+                 "order": {nid: _dark_order(seed, node) for nid, node in ch["nodes"].items()}},
+        "created_at": now_utc(), "finished_at": None, "report": None,
+    }
+    await db.sessions.insert_one(doc)
+    return doc
+
+
+async def get_dark(user: dict, sid: str) -> dict:
+    oid = to_object_id(sid, 404, "Session not found")
+    s = await get_db().sessions.find_one({"_id": oid, "user_id": user["_id"], "mode": "dark"})
+    if s is None:
+        raise HTTPException(404, "Session not found")
+    return s
+
+
+async def dark_choose(user: dict, sid: str, key: str) -> dict:
+    s = await get_dark(user, sid)
+    if s["state"] != "active":
+        raise HTTPException(409, "This run is already over")
+    ch, d = s["character"], s["dark"]
+    node = ch["nodes"][d["node_id"]]
+    try:
+        oi = int(key)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Bad option")
+    if not 0 <= oi < len(node["options"]) or oi in d["locked"].get(node["id"], []):
+        raise HTTPException(409, "That option is already used")
+    o = node["options"][oi]
+    d["turns"] += 1
+    entry = {"node": node["id"], "text": node["text"], "chosen": o["text"], "approach": o["approach"],
+             "outcome": o["outcome"], "rationale": o["rationale"], "reveal": o["reveal"]}
+    if o["outcome"] == "optimal":
+        d["points"] = min(DARK_START_POINTS, d["points"] + 1)
+        if o["reveal"]:
+            d["revealed"][o["reveal"]] = True
+        d["node_id"] = o["next"] or d["node_id"]
+        if all(d["revealed"].get(k) for k in DARK_SECRETS):
+            d["outcome"] = "success"
+        elif o["next"] is None:
+            d["outcome"] = "bored"      # the script ran out before all three were earned
+    elif o["outcome"] == "neutral":
+        d["stalls"] += 1
+        d["wasted"] += 1
+        d["locked"].setdefault(node["id"], []).append(oi)
+        if d["stalls"] >= DARK_MAX_STALLS:
+            d["outcome"] = "bored"
+    else:
+        d["points"] -= 1
+        d["wasted"] += 1
+        d["locked"].setdefault(node["id"], []).append(oi)
+        if d["points"] <= 0:
+            d["outcome"] = "burned"
+    entry["points"] = d["points"]
+    d["log"].append(entry)
+    sets = {"dark": d}
+    if d["outcome"]:
+        sets.update({"state": "finished", "finished_at": now_utc()})
+        sets["report"] = _dark_report({**s, "dark": d, "state": "finished"})
+    out = await get_db().sessions.find_one_and_update(
+        {"_id": s["_id"], "user_id": user["_id"], "state": "active"}, {"$set": sets},
+        return_document=ReturnDocument.AFTER)
+    return out or await get_dark(user, sid)
+
+
+async def dark_restart(user: dict, sid: str) -> dict:
+    s = await get_dark(user, sid)
+    if s["state"] == "active":
+        raise HTTPException(409, "Finish the current conversation first")
+    return await create_dark(user, s["difficulty"])
+
+
 # ---------------------------------------------------------------- history
 HISTORY_WINDOW = 30
 HISTORY_PAGE_MAX = 366
 
 
-def _finished_query(user: dict) -> dict:
-    return {"user_id": user["_id"], "mode": "circuit", "state": "finished", "report": {"$ne": None}}
+def _finished_query(user: dict, mode: str = "circuit") -> dict:
+    return {"user_id": user["_id"], "mode": mode, "state": "finished", "report": {"$ne": None}}
 
 
 def _day_entry(s: dict) -> dict:
     rep = s.get("report") or {}
+    if s["mode"] == "dark":
+        found = rep.get("found") or {}
+        n = sum(1 for k in DARK_SECRETS if found.get(k))
+        pts = rep.get("dark_points") or 0
+        return {
+            "date": s["date"], "difficulty": s.get("difficulty"), "total_points": pts,
+            "level_avg": None, "streak": None, "outcome": rep.get("outcome"),
+            "questions_solved": n, "questions_offered": len(DARK_SECRETS), "dark": True,
+            "pillars": [{"pillar": "surveillance", "level": s.get("difficulty"), "correct": n,
+                         "offered": len(DARK_SECRETS), "accuracy": round(n / len(DARK_SECRETS), 3),
+                         "score": pts, "weight": None, "volume": None, "points": pts, "review": []}],
+        }
     return {
         "date": s["date"], "difficulty": s.get("difficulty"),
         "total_points": rep.get("total_points"), "level_avg": rep.get("level_avg"),
@@ -321,13 +497,15 @@ def _day_entry(s: dict) -> dict:
     }
 
 
-async def history(user: dict, days: int, before: str | None, limit: int, include_archived: bool) -> dict:
-    """Finished circuits, newest day first. Default window is the last `days` (30) IST days;
+async def history(user: dict, days: int, before: str | None, limit: int, include_archived: bool,
+                  mode: str = "circuit") -> dict:
+    """Finished runs, newest day first. Default window is the last `days` (30) IST days;
     anything older is 'archived' and only returned when include_archived is set."""
     days = max(1, min(days, 365))
     limit = max(1, min(limit, HISTORY_PAGE_MAX))
+    mode = mode if mode in ("circuit", "dark") else "circuit"
     floor = shift_date(today_ist(), -(days - 1))
-    q = _finished_query(user)
+    q = _finished_query(user, mode)
     if before:
         q["date"] = {"$lt": before} if include_archived else {"$lt": before, "$gte": floor}
     elif not include_archived:
@@ -336,9 +514,10 @@ async def history(user: dict, days: int, before: str | None, limit: int, include
     entries = [_day_entry(s) for s in rows]
     archived_days = 0
     if not include_archived:
-        archived_days = await get_db().sessions.count_documents({**_finished_query(user), "date": {"$lt": floor}})
+        archived_days = await get_db().sessions.count_documents(
+            {**_finished_query(user, mode), "date": {"$lt": floor}})
     return {
-        "window_days": days, "include_archived": include_archived,
+        "window_days": days, "include_archived": include_archived, "mode": mode,
         "entries": entries,
         "next_before": entries[-1]["date"] if len(rows) >= limit else None,
         "archived_days": archived_days,

@@ -23,25 +23,27 @@ async def start_circuit(body: CircuitIn, user: dict = Depends(get_profiled_user)
 async def get_history(
     days: int = Query(30, ge=1, le=365), before: str | None = None,
     limit: int = Query(10, ge=1, le=60), include_archived: bool = False,
+    mode: str = Query("circuit", pattern="^(circuit|dark)$"),
     user: dict = Depends(get_profiled_user),
 ):
     rate_limit("history", str(user["_id"]), 60, 600)
-    return await svc.history(user, days, before, limit, include_archived)
+    return await svc.history(user, days, before, limit, include_archived, mode)
 
 
 @router.get("/history/download")
 async def download_history(
     format: str = Query("csv", pattern="^(csv|json)$"), days: str = Query("30", max_length=8),
+    mode: str = Query("circuit", pattern="^(circuit|dark)$"),
     user: dict = Depends(get_profiled_user),
 ):
     rate_limit("history-download", str(user["_id"]), 10, 600)
     include_archived = days == "all"
     window = 365 if include_archived else max(1, int(days) if days.isdigit() else 30)
-    data = await svc.history(user, window, None, svc.HISTORY_PAGE_MAX, include_archived)
+    data = await svc.history(user, window, None, svc.HISTORY_PAGE_MAX, include_archived, mode)
     entries = data["entries"]
     if format == "json":
         body, media = json.dumps({"days": entries}, indent=1), "application/json"
-        fname = "monkey-brain-history.json"
+        fname = f"monkey-brain-history-{mode}.json"
     else:
         buf = io.StringIO()
         w = csv.writer(buf)
@@ -52,7 +54,7 @@ async def download_history(
                 w.writerow([e["date"], p["pillar"], p["level"], p["correct"], p["offered"],
                             p["accuracy"], p["score"], p.get("weight"), p.get("volume"), p.get("points")])
             w.writerow([e["date"], "TOTAL", "", "", "", "", "", "", "", e["total_points"]])
-        body, media, fname = buf.getvalue(), "text/csv", "monkey-brain-history.csv"
+        body, media, fname = buf.getvalue(), "text/csv", f"monkey-brain-history-{mode}.csv"
     return Response(content=body, media_type=media,
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 

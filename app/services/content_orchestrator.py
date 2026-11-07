@@ -19,7 +19,7 @@ from pymongo.errors import DuplicateKeyError
 from app.core.clock import now_utc, shift_date
 from app.core.db import get_db
 from app.core.hashrng import stable_key
-from app.generators import BUCKETS, arithmetic, art_params, kinesthetic, pattern
+from app.generators import BUCKETS, arithmetic, art_params, kinesthetic, pattern, surveillance
 from app.services import gemini_service, validator
 
 log = logging.getLogger("content")
@@ -47,6 +47,14 @@ ART_LEVELS = [
     ("hard", "Dense overlays: layers 3, several genuinely competing readings."),
     ("expert", "Very dense: layers 4, the shape hides well and viewers split widely."),
 ]
+SURV_BUCKETS = ("easy", "medium", "hard")
+SURV_ITEMS = 2
+SURV_MIN_KEPT = 1
+SURV_LEVELS = [
+    ("easy", "Open, talkative character. Obvious tells, gentle misdirection."),
+    ("medium", "Guarded character with a professional mask. Reads well, hides better."),
+    ("hard", "Hostile or evasive character. Respect and nerve matter; pity and flattery backfire."),
+]
 _BANK = json.loads((Path(__file__).resolve().parent.parent / "data" / "emergency_critical.json").read_text("utf-8"))
 _inflight: set[str] = set()
 _tasks: set[asyncio.Task] = set()
@@ -72,7 +80,10 @@ async def ensure_doc(date: str) -> dict:
             {"$setOnInsert": {
                 "schema_version": SCHEMA_VERSION, "created_at": now, "updated_at": now, "status": "partial",
                 "pools": pools, "sources": {p: "procedural" for p in pools}, "attempts": 0,
-                "next_attempt_at": None, "last_error": None, "lock": None,
+                "art_attempts": 0, "surv_attempts": 0,
+                "art_ready": False, "surv_ready": False,
+                "next_attempt_at": None, "art_next_attempt_at": None, "surv_next_attempt_at": None,
+                "lock": None, "art_lock": None, "surv_lock": None,
             }}, upsert=True)
     except DuplicateKeyError:
         pass
@@ -138,6 +149,10 @@ async def _run(date: str) -> None:
         await generate_art(date)
     except Exception:  # noqa: BLE001
         log.exception("art generation crashed")
+    try:
+        await generate_surveillance(date)
+    except Exception:  # noqa: BLE001
+        log.exception("surveillance generation crashed")
     finally:
         _inflight.discard(date)
 
@@ -230,9 +245,12 @@ def _procedural_art(date: str) -> dict:
 async def _acquire_art(date: str, token: str) -> bool:
     now = now_utc()
     res = await get_db().daily_challenges.update_one(
-        {"_id": date, "art_ready": {"$ne": True}, "art_attempts": {"$lt": MAX_ATTEMPTS},
-         "$and": [{"$or": [{"art_lock": None}, {"art_lock.expires_at": {"$lt": now}}]},
-                  {"$or": [{"art_next_attempt_at": None}, {"art_next_attempt_at": {"$lte": now}}]}]},
+        {"_id": date, "art_ready": {"$ne": True},
+         "$and": [
+             {"$or": [{"art_attempts": {"$exists": False}}, {"art_attempts": {"$lt": MAX_ATTEMPTS}}]},
+             {"$or": [{"art_lock": None}, {"art_lock.expires_at": {"$lt": now}}]},
+             {"$or": [{"art_next_attempt_at": None}, {"art_next_attempt_at": {"$lte": now}}]},
+         ]},
         {"$set": {"art_lock": {"owner": token, "expires_at": now + LOCK_TTL}}},
     )
     return res.modified_count == 1
@@ -301,3 +319,110 @@ async def generate_art(date: str) -> str:
         await col.update_one({"_id": date, "art_lock.owner": token}, {"$set": upd})
         log.warning("art generation failed (%d/%d): %r", attempts, MAX_ATTEMPTS, e)
         return "failed"
+
+
+# ---------------------------------------------------------------- dark pillar: surveillance
+def _surv_bank() -> dict:
+    return {b: surveillance.bank_pool(i) for i, b in enumerate(SURV_BUCKETS)}
+
+
+async def _surv_labels() -> list[str]:
+    rows = await get_db().faces.find({}, {"_id": 1}).to_list(200)
+    return [str(r["_id"]) for r in rows] or surveillance.DEFAULT_IMAGE_LABELS
+
+
+async def _acquire_surv(date: str, token: str) -> bool:
+    now = now_utc()
+    res = await get_db().daily_challenges.update_one(
+        {"_id": date, "surv_ready": {"$ne": True},
+         "$and": [
+             {"$or": [{"surv_attempts": {"$exists": False}}, {"surv_attempts": {"$lt": MAX_ATTEMPTS}}]},
+             {"$or": [{"surv_lock": None}, {"surv_lock.expires_at": {"$lt": now}}]},
+             {"$or": [{"surv_next_attempt_at": None}, {"surv_next_attempt_at": {"$lte": now}}]},
+         ]},
+        {"$set": {"surv_lock": {"owner": token, "expires_at": now + LOCK_TTL}}},
+    )
+    return res.modified_count == 1
+
+
+async def _gemini_surv_pools(date: str, prev_meta: dict, labels: list[str]) -> tuple[dict, dict, dict]:
+    avoid = (prev_meta.get("names") or []) + (prev_meta.get("labels") or []) + (prev_meta.get("personalities") or [])
+    avoid = [a[:120] for a in avoid][:40]
+    prev_labels = set(prev_meta.get("labels") or [])
+    pools, sources = {}, {}
+    names, used_labels, personalities = [], [], []
+    any_ok = False
+    for b, (name, desc) in enumerate(SURV_LEVELS):
+        kept: list[dict] = []
+        try:
+            raws = await gemini_service.generate_surveillance_items(name, desc, SURV_ITEMS, avoid, labels)
+            full = [c for c in (surveillance.validate_character(r, b, k) for k, r in enumerate(raws)) if c]
+            fresh = [c for c in full if c["image_label"] not in prev_labels]   # replays should feel new
+            kept = (fresh or full)[:SURV_ITEMS]
+            for c in kept:
+                names.append(c["name"])
+                used_labels.append(c["image_label"])
+                personalities.append(c["personality"][:120])
+        except Exception as e:  # noqa: BLE001
+            log.warning("surveillance bucket %s failed: %r", name, e)
+        if len(kept) >= SURV_MIN_KEPT:
+            pools[name], sources[name] = kept, "gemini"
+            any_ok = True
+        else:
+            pools[name], sources[name] = surveillance.bank_pool(b), "bank"
+            used_labels.extend(c["image_label"] for c in pools[name])
+    if not any_ok:
+        raise RuntimeError("no surveillance bucket passed validation")
+    return pools, sources, {"names": names[:40], "labels": sorted(set(used_labels))[:60], "personalities": personalities[:20]}
+
+
+async def generate_surveillance(date: str) -> str:
+    """Same contract as the other pools, but with its own lock/attempts: dark content is independent."""
+    col = get_db().daily_challenges
+    await ensure_doc(date)
+    token = uuid.uuid4().hex
+    if not await _acquire_surv(date, token):
+        return "skipped"
+    try:
+        prev = await col.find_one({"_id": shift_date(date, -1)}, {"surv_meta": 1}) or {}
+        labels = await _surv_labels()
+        pools, sources, meta = await asyncio.wait_for(
+            _gemini_surv_pools(date, prev.get("surv_meta") or {}, labels), timeout=GEN_TIMEOUT_S)
+        res = await col.update_one(
+            {"_id": date, "surv_lock.owner": token},
+            {"$set": {"pools.surveillance": pools, "sources.surveillance": sources, "surv_meta": meta,
+                      "surv_ready": True, "updated_at": now_utc(), "surv_last_error": None, "surv_lock": None}})
+        return "ready" if res.modified_count else "skipped"
+    except Exception as e:  # noqa: BLE001
+        doc = await col.find_one({"_id": date}, {"surv_attempts": 1}) or {}
+        attempts = doc.get("surv_attempts", 0) + 1
+        upd = {"surv_attempts": attempts, "surv_last_error": repr(e)[:300], "surv_lock": None,
+               "surv_next_attempt_at": now_utc() + timedelta(minutes=15 * attempts)}
+        await col.update_one({"_id": date, "surv_lock.owner": token}, {"$set": upd})
+        log.warning("surveillance generation failed (%d/%d): %r", attempts, MAX_ATTEMPTS, e)
+        return "failed"
+
+
+async def resolve_surveillance(date: str) -> dict:
+    """Never blocks on Gemini: the bundled bank is always playable."""
+    doc = await ensure_doc(date)
+    pools = (doc.get("pools") or {}).get("surveillance")
+    if pools:
+        return pools
+    if gemini_service.available() and doc.get("surv_attempts", 0) < MAX_ATTEMPTS:
+        kick(date)
+    return _surv_bank()
+
+
+async def reset_generation(date: str, pillar: str) -> None:
+    """Admin 'regenerate': clear the readiness/backoff so the next call actually runs."""
+    col = get_db().daily_challenges
+    if pillar == "critical":
+        await col.update_one({"_id": date}, {"$unset": {"pools.critical": "", "sources.critical": ""},
+                                             "$set": {"attempts": 0, "lock": None, "next_attempt_at": None}})
+    elif pillar == "art":
+        await col.update_one({"_id": date}, {"$set": {"art_ready": False, "art_attempts": 0,
+                                                      "art_lock": None, "art_next_attempt_at": None}})
+    elif pillar == "surveillance":
+        await col.update_one({"_id": date}, {"$set": {"surv_ready": False, "surv_attempts": 0,
+                                                      "surv_lock": None, "surv_next_attempt_at": None}})

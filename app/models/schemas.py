@@ -105,6 +105,28 @@ class PracticeIn(BaseModel):
     slider: float = Field(default=0.5, ge=0.0, le=1.0)  # 0 easy, 0.5 medium, 1 hard
 
 
+class DarkStartIn(BaseModel):
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+
+
+class DarkChooseIn(BaseModel):
+    key: str = Field(min_length=1, max_length=8)
+
+
+class FaceIn(BaseModel):
+    label: str = Field(min_length=2, max_length=32)
+    filename: str = Field(min_length=3, max_length=120)
+
+
+class FaceRenameIn(BaseModel):
+    label: str = Field(min_length=2, max_length=32)
+
+
+class GenerateIn(BaseModel):
+    pillar: Literal["all", "critical", "art", "surveillance"]
+    force: bool = True
+
+
 class TrialIn(BaseModel):
     id: str = Field(max_length=32)
     rt_ms: float | None = Field(default=None, ge=0, le=60000)

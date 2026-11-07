@@ -43,7 +43,6 @@ class _ArtReadings(BaseModel):
     cosmic: list[str]
     figure: list[str]
 
-
 class _ArtItem(BaseModel):
     kind: str
     a: float
@@ -62,6 +61,42 @@ class _ArtItem(BaseModel):
 
 class _ArtBatch(BaseModel):
     items: list[_ArtItem]
+
+
+class _SurvSecrets(BaseModel):
+    strength: str
+    weakness: str
+    goal: str
+
+
+class _SurvOption(BaseModel):
+    text: str
+    approach: str
+    next: str | None = None
+    reveal: str | None = None
+    rationale: str
+
+
+class _SurvNode(BaseModel):
+    id: str
+    text: str
+    options: list[_SurvOption]
+
+
+class _SurvItem(BaseModel):
+    image_label: str
+    name: str
+    description: str
+    personality: str
+    tone: str
+    responds_to: list[str]
+    shuts_down_to: list[str]
+    secrets: _SurvSecrets
+    nodes: list[_SurvNode]
+
+
+class _SurvBatch(BaseModel):
+    items: list[_SurvItem]
 
 
 def available() -> bool:
@@ -108,6 +143,15 @@ async def generate_art_items(level_name: str, level_desc: str, n: int, avoid: li
     prompt = _env.get_template("art_curves.j2").render(
         level_name=level_name, level_desc=level_desc, n=n, avoid=", ".join(avoid) or "none")
     data = await _call(settings.gemini_model, prompt, _ArtBatch, 1.0)
+    return data.get("items", [])
+
+
+async def generate_surveillance_items(level_name: str, level_desc: str, n: int, avoid: list[str],
+                                      labels: list[str]) -> list[dict]:
+    prompt = _env.get_template("surveillance.j2").render(
+        level_name=level_name, level_desc=level_desc, n=n, avoid=", ".join(avoid) or "none",
+        labels=", ".join(labels) or "student_1, boss_1, owner_1")
+    data = await _call(settings.gemini_model, prompt, _SurvBatch, 1.0)
     return data.get("items", [])
 
 
