@@ -4,5 +4,6 @@
   try {
     var t = localStorage.getItem("bm_theme");
     if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    if (localStorage.getItem("bm_s_mode") === "1") document.documentElement.setAttribute("data-s-mode", "");
   } catch (e) { /* storage blocked: fall back to the device setting */ }
 })();
