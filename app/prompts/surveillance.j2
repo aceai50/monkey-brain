@@ -4,25 +4,35 @@ Hard content rules (never break these): every character is a fictional adult (18
 
 Difficulty: {{ level_name }}. {{ level_desc }}
 
-TRAIT SHEET decides what works. Pick 1-2 approaches the character responds to and 1-2 that make them shut down, from: empathy, flattery, pressure, honesty, deflection. The two lists must not overlap.
-- An option whose approach is in "responds_to" is OPTIMAL (it works: the character opens up).
-- An option whose approach is in "shuts_down_to" is BAD (it backfires).
-- Any other approach is NEUTRAL (the character stalls).
-You do NOT label outcomes; they are derived from your trait sheet.
+TAG PALETTE. First invent 4-5 approach tags that fit THIS character's world (lowercase, 2-24 chars, e.g. "deference", "straight talk", "nerve", "praise", "concern", "banter"). Do not reuse the generic set empathy/flattery/pressure/honesty/deflection unless the scenario truly calls for it. Tags are shown to the player, so they must describe the move, not the outcome.
+
+OUTCOMES ARE PER OPTION. Every option gets exactly one of: "optimal", "neutral", "bad".
+- optimal: it works this turn (the character opens up)
+- neutral: it politely stalls them
+- bad: it backfires this turn
+
+CONTEXT IS EVERYTHING. The same tag must succeed at one point and backfire at another — a move that reads as caring early can read as prying once they are exposed, and a move that reads as manipulative can land once they are invested. Write each line so the dialogue itself signals why it lands or fails right now.
+
+VARIETY RULES (the validator enforces these; violating them discards the item):
+- Each node has exactly 4 options with 4 DIFFERENT tags, exactly 1 optimal, at least 1 neutral and at least 1 bad.
+- Across the whole character, at least 4 different tags must win, and no tag may win more than half the turns.
+- Every tag that wins somewhere must also lose somewhere (appear as a bad option at another node).
+- Two consecutive turns on the optimal path must not have the same winning tag.
+- So: no "always be sincere" and no "always push" character. The right move must move around.
 
 Return ONE character per object. Rules:
 - "image_label": choose one of these existing portraits: {{ labels }}.
-- "name": first name only, fictional. "description": 1-2 sentences of relationship context (how the player knows them).
-- "personality": 1-2 sentences describing their real temperament (revealed only in the debrief).
+- "name": first name only, fictional. "description": 1-2 sentences of relationship context.
+- "personality": 1-2 sentences describing their real temperament (revealed in the debrief).
 - "tone": 2-5 words, e.g. "clipped and professional".
-- "secrets": three short factual sentences: strength, weakness, goal. These are what the player must uncover.
+- "read": 1-2 sentences telling the player how this person works (shown only in the debrief).
+- "tags": the palette (4-5 tags).
+- "secrets": three short factual sentences: strength, weakness, goal.
 - "nodes": 5 to 9 nodes, ids "n1"..."n9", unique, every node reachable from "n1".
-- Each node: "text" is the character's spoken line (max 400 chars). Exactly 4 "options".
-- Each option: "text" (max 160 chars, in the player's voice), "approach" (one of the five), "next" (a node id, or null to end), "reveal" (only on an option whose approach is in responds_to; one of strength/weakness/goal, else null), "rationale" (one short sentence, hidden until the debrief, saying why this approach works or fails for THIS character).
-- EVERY node needs at least one responds_to option and at least one shuts_down_to option.
-- Across the whole graph, the three secrets must EACH be revealed by some responds_to option, and at least one responds_to option must have "next": null so the conversation can end.
-- The character should reveal things gradually and naturally; secrets are earned, never volunteered. Wrong approaches should have in-character reactions, not lectures.
+- Node "text": the character's spoken line (max 400 chars).
+- Option fields: "text" (max 160 chars, player's voice), "tag" (from the palette), "outcome" (optimal/neutral/bad), "next" (a node id, or null to end), "reveal" (only on an optimal option; strength/weakness/goal, else null), "rationale" (one short sentence, hidden until the debrief, saying why this move works or fails for THIS person right now).
+- The three secrets must EACH be revealed by some optimal option, and at least one optimal option must have "next": null so the conversation can end.
 - Avoid these names, personalities and image labels from recent days: {{ avoid }}.
 
 Example shape (abbreviated):
-{"image_label": "boss_1", "name": "Cole", "description": "Your manager of two years.", "personality": "Competent, controlling, hates being managed.", "tone": "clipped and professional", "responds_to": ["honesty"], "shuts_down_to": ["pressure"], "secrets": {"strength": "...", "weakness": "...", "goal": "..."}, "nodes": [{"id": "n1", "text": "Make it quick.", "options": [{"text": "Straight to it.", "approach": "honesty", "next": "n2", "reveal": null, "rationale": "Directness matches her tempo."}]}]}
+{"image_label": "boss_1", "name": "Cole", "description": "Your manager of two years.", "personality": "Competent, controlling, quietly proud.", "tone": "clipped and professional", "read": "Blunt first, then respect; pride opens the last door.", "tags": ["candour", "deference", "pressure", "flattery"], "secrets": {"strength": "...", "weakness": "...", "goal": "..."}, "nodes": [{"id": "n1", "text": "Make it quick.", "options": [{"text": "Straight to it: I need your read.", "tag": "candour", "outcome": "optimal", "next": "n2", "reveal": null, "rationale": "Directness matches her tempo."}]}]}

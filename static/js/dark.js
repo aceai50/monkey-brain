@@ -4,9 +4,6 @@ import { h, notice, render, toast, topbar } from "./dom.js";
 
 const SECRET_LABEL = { strength: "Strength", weakness: "Weakness", goal: "Goal" };
 const OUTCOME_LABEL = { success: "Mission successful.", bored: "They got bored and left.", burned: "You burned every point." };
-const APPROACH_HINT = {
-  empathy: "warmth", flattery: "praise", pressure: "push", honesty: "candour", deflection: "evasion",
-};
 
 export function darkView(root, ctx) {
   const sid = ctx.arg;
@@ -77,13 +74,38 @@ export function darkView(root, ctx) {
       h("button", { class: "btn surv-option" + (o.locked ? " is-locked" : ""), type: "button",
         disabled: o.locked, onclick: () => choose(o.key) },
         h("span", { class: "surv-option__text" }, o.text),
-        h("span", { class: "surv-tag mono" }, o.approach))));
+        h("span", { class: "surv-tag mono" }, o.tag))));
   }
 
   function draw() {
     if (s.state === "finished") return report();
+    let armed = false;
+    const skipBtn = s.can_skip
+      ? h("button", { class: "btn btn--quiet", type: "button" }, "Skip to next character")
+      : null;
+    if (skipBtn) {
+      skipBtn.addEventListener("click", async () => {
+        if (!armed) {
+          armed = true;
+          skipBtn.textContent = "Skip? Click again";
+          setTimeout(() => { armed = false; skipBtn.textContent = "Skip to next character"; }, 3000);
+          return;
+        }
+        skipBtn.disabled = true;
+        try {
+          const n = await api(`/api/dark/${sid}/skip`, { method: "POST" });
+          ctx.navigate(`#/dark/${n.id}`);
+        } catch (e) {
+          toast(e.message);
+          skipBtn.disabled = false;
+          armed = false;
+          skipBtn.textContent = "Skip to next character";
+        }
+      });
+    }
     render(stage,
       h("div", { class: "row-actions surv-top" },
+        skipBtn,
         h("a", { class: "link-btn", href: "#/s-mode" }, "Leave (progress is saved)")),
       card(), pips(), transcript(), options());
   }
@@ -105,8 +127,8 @@ export function darkView(root, ctx) {
         h("h3", {}, r.name),
         h("p", { class: "muted small mono" }, r.tone),
         h("p", {}, r.personality),
-        h("p", { class: "mono small" }, "Responds to: " + r.responds_to.join(", ")),
-        h("p", { class: "mono small" }, "Shuts down on: " + r.shuts_down_to.join(", "))),
+        h("p", { class: "mono small" }, "Their dialect: " + (r.tags || []).join(", ")),
+        h("p", {}, r.read || "")),
       h("div", { class: "panel" },
         h("h3", {}, "What you found"),
         h("dl", { class: "surv-secrets" }, ...Object.keys(SECRET_LABEL).map((k) => [
@@ -120,13 +142,13 @@ export function darkView(root, ctx) {
       h("div", { class: "panel" },
         h("h3", {}, "Your style"),
         h("dl", { class: "surv-secrets" }, ...Object.entries(r.style).map(([k, n]) => [
-          h("dt", { class: "mono small" }, `${k} (${APPROACH_HINT[k] || ""})`),
+          h("dt", { class: "mono small" }, k),
           h("dd", { class: "small" }, `${n} pick${n === 1 ? "" : "s"}`),
         ]).flat())),
       h("div", { class: "reviews" }, h("h2", {}, "Debrief"),
         ...r.log.map((e, i) => h("details", { class: "review" + (e.outcome === "optimal" ? " is-right" : " is-wrong") },
           h("summary", {}, `${i + 1}. "${e.chosen}"`),
-          h("p", { class: "mono small" }, `${e.approach} · ${e.outcome}` + (e.reveal ? ` · revealed ${e.reveal}` : "")),
+          h("p", { class: "mono small" }, `${e.tag || e.approach || "?"} · ${e.outcome}` + (e.reveal ? ` · revealed ${e.reveal}` : "")),
           h("p", {}, e.rationale),
           h("p", { class: "muted small" }, `${r.name}: ${e.text}`)))),
       h("div", { class: "row-actions" },

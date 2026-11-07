@@ -324,14 +324,15 @@ def _dark_report(s: dict) -> dict:
     score = round(100 * (0.5 * n_found / 3 + 0.3 * d["points"] / DARK_START_POINTS + 0.2 * efficiency))
     style: dict[str, int] = {}
     for entry in d["log"]:
-        style[entry["approach"]] = style.get(entry["approach"], 0) + 1
+        k = entry.get("tag") or entry.get("approach") or "?"
+        style[k] = style.get(k, 0) + 1
     return {
         "mode": "dark", "pillar": "surveillance", "outcome": d.get("outcome"),
         "dark_points": score, "points_left": d["points"], "stalls": d["stalls"],
         "turns": d["turns"], "wasted": d["wasted"], "found": found, "secrets": ch["secrets"],
         "name": ch["name"], "personality": ch["personality"], "tone": ch["tone"],
         "image_label": ch["image_label"], "style": style,
-        "responds_to": ch["responds_to"], "shuts_down_to": ch["shuts_down_to"], "log": d["log"],
+        "tags": ch["tags"], "read": ch["read"], "log": d["log"],
     }
 
 
@@ -345,6 +346,7 @@ def dark_public(s: dict) -> dict:
         "image_url": s.get("image_url") or f"/static/img/faces/{ch['image_label']}.jpg",
         "points": d["points"], "max_points": DARK_START_POINTS,
         "stalls": d["stalls"], "max_stalls": DARK_MAX_STALLS,
+        "can_skip": int(s.get("pool_size") or 1) > 1, "pool_size": int(s.get("pool_size") or 1),
         "found": {k: bool(d["revealed"].get(k)) for k in DARK_SECRETS},
         "secrets": {k: (ch["secrets"][k] if d["revealed"].get(k) else None) for k in DARK_SECRETS},
         "messages": [m for entry in d["log"] for m in (
@@ -361,10 +363,31 @@ def dark_public(s: dict) -> dict:
     out["node"] = {
         "id": node["id"], "text": node["text"],
         "options": [{"key": str(i), "text": node["options"][i]["text"],
-                     "approach": node["options"][i]["approach"], "locked": i in locked}
+                     "tag": node["options"][i].get("tag") or node["options"][i].get("approach") or "?",
+                     "locked": i in locked}
                     for i in d["order"][node["id"]]],
     }
     return out
+
+
+async def _create_dark_with(user: dict, bucket: str, ch: dict, pool_size: int, attempt: int = 1) -> dict:
+    db = get_db()
+    face = await db.faces.find_one({"_id": ch["image_label"]})
+    image_url = (f"/static/img/faces/{face['filename']}" if face
+                 else f"/static/img/faces/{ch['image_label']}.jpg")
+    seed = uuid.uuid4().hex
+    doc = {
+        "_id": ObjectId(), "user_id": user["_id"], "date": today_ist(), "mode": "dark", "pillar": "surveillance",
+        "difficulty": bucket, "state": "active", "character": ch, "image_url": image_url,
+        "pool_size": pool_size,
+        "dark": {"node_id": ch["start"], "points": DARK_START_POINTS, "stalls": 0, "locked": {},
+                 "revealed": {}, "turns": 0, "wasted": 0, "outcome": None, "log": [],
+                 "attempt": attempt, "seed": seed,
+                 "order": {nid: _dark_order(seed, node) for nid, node in ch["nodes"].items()}},
+        "created_at": now_utc(), "finished_at": None, "report": None,
+    }
+    await db.sessions.insert_one(doc)
+    return doc
 
 
 async def create_dark(user: dict, difficulty: str) -> dict:
@@ -384,21 +407,27 @@ async def create_dark(user: dict, difficulty: str) -> dict:
     fresh = [c for c in items if c["image_label"] not in seen] or items
     runs = await db.sessions.count_documents({"user_id": user["_id"], "mode": "dark"})
     ch = fresh[runs % len(fresh)]
-    face = await db.faces.find_one({"_id": ch["image_label"]})
-    image_url = (f"/static/img/faces/{face['filename']}" if face
-                 else f"/static/img/faces/{ch['image_label']}.jpg")
-    seed = uuid.uuid4().hex
-    doc = {
-        "_id": ObjectId(), "user_id": user["_id"], "date": date, "mode": "dark", "pillar": "surveillance",
-        "difficulty": bucket, "state": "active", "character": ch, "image_url": image_url,
-        "dark": {"node_id": ch["start"], "points": DARK_START_POINTS, "stalls": 0, "locked": {},
-                 "revealed": {}, "turns": 0, "wasted": 0, "outcome": None, "log": [],
-                 "attempt": runs + 1, "seed": seed,
-                 "order": {nid: _dark_order(seed, node) for nid, node in ch["nodes"].items()}},
-        "created_at": now_utc(), "finished_at": None, "report": None,
-    }
-    await db.sessions.insert_one(doc)
-    return doc
+    return await _create_dark_with(user, bucket, ch, len(items), attempt=runs + 1)
+
+
+async def dark_skip(user: dict, sid: str) -> dict:
+    """Discard this run and start the next loaded character in the same bucket (cyclic)."""
+    s = await get_dark(user, sid)
+    if s["state"] != "active":
+        raise HTTPException(409, "This run is already over")
+    bucket = s["difficulty"]
+    pool = await content.resolve_surveillance(today_ist())
+    items = pool.get(bucket) or pool.get("medium") or []
+    if len(items) < 2:
+        raise HTTPException(409, "There is no other character to skip to")
+    cur = s["character"]
+    idx = next((i for i, c in enumerate(items)
+                if c.get("id") == cur.get("id")
+                or (c.get("image_label") == cur.get("image_label") and c.get("name") == cur.get("name"))), -1)
+    nxt = items[(idx + 1) % len(items)]
+    await get_db().sessions.delete_one(
+        {"_id": s["_id"], "user_id": user["_id"], "mode": "dark", "state": "active"})
+    return await _create_dark_with(user, bucket, nxt, len(items))
 
 
 async def get_dark(user: dict, sid: str) -> dict:
@@ -406,6 +435,12 @@ async def get_dark(user: dict, sid: str) -> dict:
     s = await get_db().sessions.find_one({"_id": oid, "user_id": user["_id"], "mode": "dark"})
     if s is None:
         raise HTTPException(404, "Session not found")
+    if s["state"] == "active":   # keep skip availability in sync with today's (healing) pool
+        pool = await content.resolve_surveillance(today_ist())
+        n = len(pool.get(s["difficulty"]) or [])
+        if n and n != s.get("pool_size"):
+            s["pool_size"] = n
+            await get_db().sessions.update_one({"_id": s["_id"]}, {"$set": {"pool_size": n}})
     return s
 
 
@@ -423,7 +458,8 @@ async def dark_choose(user: dict, sid: str, key: str) -> dict:
         raise HTTPException(409, "That option is already used")
     o = node["options"][oi]
     d["turns"] += 1
-    entry = {"node": node["id"], "text": node["text"], "chosen": o["text"], "approach": o["approach"],
+    entry = {"node": node["id"], "text": node["text"], "chosen": o["text"],
+             "tag": o.get("tag") or o.get("approach") or "?",
              "outcome": o["outcome"], "rationale": o["rationale"], "reveal": o["reveal"]}
     if o["outcome"] == "optimal":
         d["points"] = min(DARK_START_POINTS, d["points"] + 1)

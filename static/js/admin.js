@@ -33,11 +33,18 @@ export function adminView(root, ctx) {
       pipeline,
       h("div", { class: "panel" },
         h("h3", {}, "Generate content"),
-        h("p", { class: "muted small" }, "Regenerates today's pools with Gemini. Each pillar has its own lock and fallback."),
+        h("p", { class: "muted small" }, "Regenerates today's pools with Gemini. Surveillance creates one character per level by default; use +3 to add more to the pool."),
         genMsg,
         h("div", { class: "row-actions" },
           genBtn("all", "All pillars"), genBtn("critical", "Critical thinking"),
-          genBtn("art", "Art"), genBtn("surveillance", "Surveillance"))),
+          genBtn("art", "Art"), genBtn("surveillance", "Surveillance"),
+          h("button", { class: "btn", type: "button", onclick: async () => {
+            try {
+              const r = await api("/api/admin/generate", { method: "POST",
+                body: { pillar: "surveillance", count: 3, append: true, force: false } });
+              toast(`Queued: +${r.count} per level`);
+            } catch (e) { genMsg.replaceChildren(notice("error", e.message)); }
+          } }, "Surveillance +3"))),
       h("div", { class: "panel" },
         h("h3", {}, "S-mode faces"),
         h("p", { class: "muted small" }, "Register portraits from static/img/faces. The generator only picks registered labels."),

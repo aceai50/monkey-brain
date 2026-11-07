@@ -48,8 +48,8 @@ ART_LEVELS = [
     ("expert", "Very dense: layers 4, the shape hides well and viewers split widely."),
 ]
 SURV_BUCKETS = ("easy", "medium", "hard")
-SURV_ITEMS = 2
-SURV_MIN_KEPT = 1
+SURV_DEFAULT = 1               # the daily job creates one character per bucket
+SURV_MAX_ASK = 10              # admin "generate more" ceiling per bucket per call
 SURV_LEVELS = [
     ("easy", "Open, talkative character. Obvious tells, gentle misdirection."),
     ("medium", "Guarded character with a professional mask. Reads well, hides better."),
@@ -334,7 +334,7 @@ async def _surv_labels() -> list[str]:
 async def _acquire_surv(date: str, token: str) -> bool:
     now = now_utc()
     res = await get_db().daily_challenges.update_one(
-        {"_id": date, "surv_ready": {"$ne": True},
+        {"_id": date,
          "$and": [
              {"$or": [{"surv_attempts": {"$exists": False}}, {"surv_attempts": {"$lt": MAX_ATTEMPTS}}]},
              {"$or": [{"surv_lock": None}, {"surv_lock.expires_at": {"$lt": now}}]},
@@ -345,29 +345,47 @@ async def _acquire_surv(date: str, token: str) -> bool:
     return res.modified_count == 1
 
 
-async def _gemini_surv_pools(date: str, prev_meta: dict, labels: list[str]) -> tuple[dict, dict, dict]:
+def _merge_chars(existing: list[dict], new: list[dict]) -> list[dict]:
+    """Admin-added characters accumulate; duplicates (same id or label+name) are ignored."""
+    out, seen_ids, seen_sig = [], set(), set()
+    for c in (existing or []) + (new or []):
+        sig = (c.get("image_label"), c.get("name"))
+        cid = c.get("id")
+        if cid in seen_ids or sig in seen_sig:
+            continue
+        seen_ids.add(cid)
+        seen_sig.add(sig)
+        out.append(c)
+    return out
+
+
+async def _gemini_surv_pools(date: str, prev_meta: dict, labels: list[str],
+                             count: int = SURV_DEFAULT) -> tuple[dict, dict, dict]:
     avoid = (prev_meta.get("names") or []) + (prev_meta.get("labels") or []) + (prev_meta.get("personalities") or [])
     avoid = [a[:120] for a in avoid][:40]
     prev_labels = set(prev_meta.get("labels") or [])
+    count = max(1, min(count, SURV_MAX_ASK))
     pools, sources = {}, {}
     names, used_labels, personalities = [], [], []
     any_ok = False
     for b, (name, desc) in enumerate(SURV_LEVELS):
         kept: list[dict] = []
         try:
-            raws = await gemini_service.generate_surveillance_items(name, desc, SURV_ITEMS, avoid, labels)
+            raws = await gemini_service.generate_surveillance_items(name, desc, count, avoid, labels)
             full = [c for c in (surveillance.validate_character(r, b, k) for k, r in enumerate(raws)) if c]
+            for c in full:
+                c["id"] = f"ai-{uuid.uuid4().hex[:10]}"   # unique across appends
             fresh = [c for c in full if c["image_label"] not in prev_labels]   # replays should feel new
-            kept = (fresh or full)[:SURV_ITEMS]
+            kept = fresh or full
+        except Exception as e:  # noqa: BLE001
+            log.warning("surveillance bucket %s failed: %r", name, e)
+        if kept:
+            pools[name], sources[name] = kept, "gemini"
+            any_ok = True
             for c in kept:
                 names.append(c["name"])
                 used_labels.append(c["image_label"])
                 personalities.append(c["personality"][:120])
-        except Exception as e:  # noqa: BLE001
-            log.warning("surveillance bucket %s failed: %r", name, e)
-        if len(kept) >= SURV_MIN_KEPT:
-            pools[name], sources[name] = kept, "gemini"
-            any_ok = True
         else:
             pools[name], sources[name] = surveillance.bank_pool(b), "bank"
             used_labels.extend(c["image_label"] for c in pools[name])
@@ -376,10 +394,15 @@ async def _gemini_surv_pools(date: str, prev_meta: dict, labels: list[str]) -> t
     return pools, sources, {"names": names[:40], "labels": sorted(set(used_labels))[:60], "personalities": personalities[:20]}
 
 
-async def generate_surveillance(date: str) -> str:
-    """Same contract as the other pools, but with its own lock/attempts: dark content is independent."""
+async def generate_surveillance(date: str, count: int = SURV_DEFAULT, append: bool = False) -> str:
+    """Daily: one character per bucket. Admin 'generate more' passes count>1 + append=True,
+    which adds the new characters to the existing pool instead of replacing it."""
     col = get_db().daily_challenges
     await ensure_doc(date)
+    doc = await col.find_one({"_id": date}, {"pools.surveillance": 1}) or {}
+    existing = (doc.get("pools") or {}).get("surveillance")
+    if existing and not append:
+        return "skipped"
     token = uuid.uuid4().hex
     if not await _acquire_surv(date, token):
         return "skipped"
@@ -387,7 +410,13 @@ async def generate_surveillance(date: str) -> str:
         prev = await col.find_one({"_id": shift_date(date, -1)}, {"surv_meta": 1}) or {}
         labels = await _surv_labels()
         pools, sources, meta = await asyncio.wait_for(
-            _gemini_surv_pools(date, prev.get("surv_meta") or {}, labels), timeout=GEN_TIMEOUT_S)
+            _gemini_surv_pools(date, prev.get("surv_meta") or {}, labels, count), timeout=GEN_TIMEOUT_S)
+        if append and existing:
+            for b in SURV_BUCKETS:
+                merged = _merge_chars([c for c in (existing.get(b) or []) if _surv_shape_ok(c)],
+                                      pools.get(b) or [])
+                pools[b] = merged
+                sources[b] = "gemini" if any(str(c.get("id", "")).startswith("ai") for c in merged) else "bank"
         res = await col.update_one(
             {"_id": date, "surv_lock.owner": token},
             {"$set": {"pools.surveillance": pools, "sources.surveillance": sources, "surv_meta": meta,
@@ -403,15 +432,28 @@ async def generate_surveillance(date: str) -> str:
         return "failed"
 
 
+def _surv_shape_ok(c: dict) -> bool:
+    if not c.get("tags") or not isinstance(c.get("nodes"), dict):
+        return False
+    return all(isinstance(o.get("tag"), str) and o.get("outcome") in ("optimal", "neutral", "bad")
+               for n in c["nodes"].values() for o in (n.get("options") or []))
+
+
 async def resolve_surveillance(date: str) -> dict:
-    """Never blocks on Gemini: the bundled bank is always playable."""
+    """Never blocks on Gemini: the bundled bank is always playable. Old-schema pools are healed."""
     doc = await ensure_doc(date)
-    pools = (doc.get("pools") or {}).get("surveillance")
-    if pools:
-        return pools
-    if gemini_service.available() and doc.get("surv_attempts", 0) < MAX_ATTEMPTS:
+    pools = (doc.get("pools") or {}).get("surveillance") or {}
+    cleaned = {b: [c for c in (pools.get(b) or []) if _surv_shape_ok(c)] for b in SURV_BUCKETS}
+    if all(cleaned[b] for b in SURV_BUCKETS):
+        return cleaned
+    bank = _surv_bank()
+    for b in SURV_BUCKETS:
+        if not cleaned[b]:
+            cleaned[b] = bank[b]
+    if pools and gemini_service.available() and doc.get("surv_attempts", 0) < MAX_ATTEMPTS:
+        await get_db().daily_challenges.update_one({"_id": date}, {"$set": {"surv_ready": False}})
         kick(date)
-    return _surv_bank()
+    return cleaned
 
 
 async def reset_generation(date: str, pillar: str) -> None:

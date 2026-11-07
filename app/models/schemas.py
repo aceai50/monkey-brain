@@ -125,6 +125,8 @@ class FaceRenameIn(BaseModel):
 class GenerateIn(BaseModel):
     pillar: Literal["all", "critical", "art", "surveillance"]
     force: bool = True
+    count: int = Field(default=1, ge=1, le=10)
+    append: bool = False
 
 
 class TrialIn(BaseModel):

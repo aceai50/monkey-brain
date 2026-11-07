@@ -94,11 +94,16 @@ async def remove_user(uid: str, admin: dict = Depends(get_admin)):
 # ---------------------------------------------------------------- content pipeline
 @router.post("/generate", status_code=202)
 async def generate(body: GenerateIn, bg: BackgroundTasks, admin: dict = Depends(get_admin)):
-    """Queue a pool (re)generation. 'all' covers critical + art + surveillance."""
+    """Queue a pool (re)generation. 'all' covers critical + art + surveillance.
+    Surveillance with append=true ADDS characters to today's pool (admin 'generate more')."""
     rate_limit("admin-generate", str(admin["_id"]), 30, 600)
     date = today_ist()
-    targets = list(GENERATORS) if body.pillar == "all" else [body.pillar]
     await content.ensure_doc(date)
+    if body.pillar == "surveillance" and body.append:
+        await content.reset_generation(date, "surveillance")
+        bg.add_task(content.generate_surveillance, date, body.count, True)
+        return {"queued": ["surveillance"], "date": date, "count": body.count, "append": True}
+    targets = list(GENERATORS) if body.pillar == "all" else [body.pillar]
     if body.force:
         for t in targets:
             await content.reset_generation(date, t)

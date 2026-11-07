@@ -30,3 +30,10 @@ async def choose(sid: str, body: DarkChooseIn, user: dict = Depends(get_profiled
 async def restart(sid: str, user: dict = Depends(get_profiled_user)):
     rate_limit("dark-start", str(user["_id"]), 40, 3600)
     return svc.dark_public(await svc.dark_restart(user, sid))
+
+
+@router.post("/{sid}/skip", status_code=201)
+async def skip(sid: str, user: dict = Depends(get_profiled_user)):
+    """Discard this character and start the next one in the pool (cyclic)."""
+    rate_limit("dark-skip", str(user["_id"]), 200, 3600)
+    return svc.dark_public(await svc.dark_skip(user, sid))

@@ -71,7 +71,8 @@ class _SurvSecrets(BaseModel):
 
 class _SurvOption(BaseModel):
     text: str
-    approach: str
+    tag: str
+    outcome: str
     next: str | None = None
     reveal: str | None = None
     rationale: str
@@ -89,8 +90,8 @@ class _SurvItem(BaseModel):
     description: str
     personality: str
     tone: str
-    responds_to: list[str]
-    shuts_down_to: list[str]
+    read: str
+    tags: list[str]
     secrets: _SurvSecrets
     nodes: list[_SurvNode]
 
