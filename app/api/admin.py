@@ -1,9 +1,12 @@
+import math
+from datetime import timezone
 from pathlib import Path
 
+from bson import ObjectId
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pymongo.errors import DuplicateKeyError
 
-from app.core.clock import now_utc, today_ist
+from app.core.clock import now_utc, shift_date, today_ist
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.rate_limit import rate_limit
@@ -11,7 +14,7 @@ from app.core.security import get_admin, to_object_id
 from app.generators.surveillance import LABEL_RE
 from app.models.schemas import FaceIn, FaceRenameIn, GenerateIn, InviteIn
 from app.services import content_orchestrator as content
-from app.services import leaderboard_service, seats
+from app.services import generation_log, leaderboard_service, seats
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -21,7 +24,91 @@ GENERATORS = {
     "critical": content.generate_critical,
     "art": content.generate_art,
     "surveillance": content.generate_surveillance,
+    "act_deceive": content.generate_act,
 }
+# Conservative wall-clock estimates: chunked requests are spaced ~30s apart (8K TPM).
+ETA_S = {"critical": 300, "art": 300, "surveillance": 240, "act_deceive": 600}
+LOG_WINDOW_DAYS = 3
+
+
+async def _run_manual(job_id, pillar: str, date: str, fn, args: tuple) -> None:
+    try:
+        outcome = await fn(date, *args)
+    except Exception as e:  # noqa: BLE001
+        await generation_log.finish_job(job_id, pillar, date, "failed", error=repr(e))
+        return
+    await generation_log.finish_job(job_id, pillar, date, outcome)
+
+
+@router.get("/jobs")
+async def jobs(admin: dict = Depends(get_admin), page: int = 1, page_size: int = 5):
+    page = max(1, page)
+    page_size = max(1, min(page_size, 20))
+    col = get_db().gen_jobs
+    total = await col.count_documents({})
+    pages = max(1, math.ceil(total / page_size))
+    page = min(page, pages)
+    skip = (page - 1) * page_size
+    fetched = await col.find({}).sort("started_at", -1).to_list(max(1, skip + page_size))
+    rows = fetched[skip:skip + page_size]
+    now = now_utc()
+    return {"jobs": [generation_log.public_entry(r, now) for r in rows],
+            "total": total, "page": page, "pages": pages, "page_size": page_size}
+
+
+@router.get("/logs")
+async def logs(admin: dict = Depends(get_admin), page: int = 1, page_size: int = 10,
+               include_archived: bool = False):
+    """Generation log. Default window = the last 3 days; older runs are the archive and are
+    only returned when include_archived=true."""
+    page = max(1, page)
+    page_size = max(1, min(page_size, 50))
+    floor = shift_date(today_ist(), -(LOG_WINDOW_DAYS - 1))
+    q = {} if include_archived else {"date": {"$gte": floor}}
+    col = get_db().gen_jobs
+    total = await col.count_documents(q)
+    pages = max(1, math.ceil(total / page_size))
+    page = min(page, pages)
+    skip = (page - 1) * page_size
+    fetched = await col.find(q).sort("started_at", -1).to_list(max(1, skip + page_size))
+    rows = fetched[skip:skip + page_size]
+    now = now_utc()
+    archived = 0 if include_archived else await col.count_documents({"date": {"$lt": floor}})
+    return {"entries": [generation_log.public_entry(r, now) for r in rows],
+            "total": total, "page": page, "pages": pages, "page_size": page_size,
+            "window_days": LOG_WINDOW_DAYS, "include_archived": include_archived,
+            "archived": archived}
+
+
+@router.post("/generate", status_code=202)
+async def generate(body: GenerateIn, bg: BackgroundTasks, admin: dict = Depends(get_admin)):
+    """Queue a pool (re)generation. Returns job ids the admin panel can poll."""
+    rate_limit("admin-generate", str(admin["_id"]), 30, 600)
+    date = today_ist()
+    await content.ensure_doc(date)
+    if body.pillar == "surveillance" and body.append:
+        await content.reset_generation(date, "surveillance")
+        targets, args = ["surveillance"], (body.count, True)
+    elif body.pillar == "act_deceive" and body.append:
+        await content.reset_generation(date, "act_deceive")
+        targets, args = ["act_deceive"], (body.count, True)
+    else:
+        targets = list(GENERATORS) if body.pillar == "all" else [body.pillar]
+        if body.force:
+            for t in targets:
+                await content.reset_generation(date, t)
+        args = ()
+    queued, jobs_out = [], []
+    count = body.count if (body.append and body.pillar in ("surveillance", "act_deceive")) else 1
+    for t in targets:
+        eta = ETA_S.get(t, 120) * max(1, count)
+        job_id = await generation_log.start_job(t, date, trigger="admin", count=count,
+                                                requested_by=str(admin["_id"]), eta=eta)
+        bg.add_task(_run_manual, job_id, t, date, GENERATORS[t], args)
+        queued.append(t)
+        jobs_out.append({"id": str(job_id), "pillar": t, "eta": eta, "count": count})
+    return {"queued": queued, "date": date, "jobs": jobs_out,
+            "total_eta": sum(j["eta"] for j in jobs_out)}
 
 
 def _iso(dt):
@@ -46,6 +133,8 @@ async def overview(admin: dict = Depends(get_admin)):
                          "characters": [{"name": c.get("name"), "difficulty": b, "label": c.get("image_label")}
                                         for b, items in (pools.get("surveillance") or {}).items()
                                         for c in items]},
+        "act_deceive": {"source": src.get("act_deceive"), "ready": bool(doc.get("ad_ready")),
+                        "attempts": doc.get("ad_attempts", 0), "error": doc.get("ad_last_error")},
     }
     return {
         "date": today_ist(),
@@ -92,24 +181,7 @@ async def remove_user(uid: str, admin: dict = Depends(get_admin)):
 
 
 # ---------------------------------------------------------------- content pipeline
-@router.post("/generate", status_code=202)
-async def generate(body: GenerateIn, bg: BackgroundTasks, admin: dict = Depends(get_admin)):
-    """Queue a pool (re)generation. 'all' covers critical + art + surveillance.
-    Surveillance with append=true ADDS characters to today's pool (admin 'generate more')."""
-    rate_limit("admin-generate", str(admin["_id"]), 30, 600)
-    date = today_ist()
-    await content.ensure_doc(date)
-    if body.pillar == "surveillance" and body.append:
-        await content.reset_generation(date, "surveillance")
-        bg.add_task(content.generate_surveillance, date, body.count, True)
-        return {"queued": ["surveillance"], "date": date, "count": body.count, "append": True}
-    targets = list(GENERATORS) if body.pillar == "all" else [body.pillar]
-    if body.force:
-        for t in targets:
-            await content.reset_generation(date, t)
-    for t in targets:
-        bg.add_task(GENERATORS[t], date)
-    return {"queued": targets, "date": date}
+# (the /generate and /jobs handlers live near the top of this module, beside GENERATORS)
 
 
 # ---------------------------------------------------------------- face library (S-mode)

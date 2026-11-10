@@ -14,11 +14,7 @@ router = APIRouter(prefix="/internal", tags=["internal"], include_in_schema=Fals
 async def _work(date: str) -> None:
     await content.ensure_doc(date)
     if gemini_service.available():
-        for gen in (content.generate_critical, content.generate_art, content.generate_surveillance):
-            try:
-                await gen(date)
-            except Exception:  # noqa: BLE001 - one pillar's failure must not cancel the others
-                pass
+        await content.run_all(date, "cron")
 
 
 @router.post("/generate", status_code=202)

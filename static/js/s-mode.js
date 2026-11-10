@@ -2,12 +2,10 @@ import { api } from "./api.js";
 import { logout, state } from "./auth.js";
 import { h, notice, render, topbar } from "./dom.js";
 
-const DARK_PILLARS = [
-  { id: "surveillance", name: "Surveillance", live: true,
-    blurb: "One conversation. Read a stranger and earn what they never say out loud." },
-  { id: "leverage", name: "Leverage", live: false, blurb: "Coming eventually." },
-  { id: "contraband", name: "Contraband", live: false, blurb: "Coming eventually." },
-];
+const OUTCOME_LABEL = {
+  success: "mission successful", bored: "they got bored", burned: "burned out",
+  convinced: "convinced the room", partial: "partly convincing", busted: "busted",
+};
 
 function segmented(name, options, value, onChange) {
   const wrap = h("div", { class: "segmented", role: "radiogroup", "aria-label": name });
@@ -30,34 +28,79 @@ export function exitSMode(ctx) {
   if (ctx) ctx.navigate("#/dashboard");
 }
 
-const OUTCOME_LABEL = { success: "Mission successful", bored: "They got bored and left", burned: "You burned every point" };
-
 export function sModeView(root, ctx) {
+  let pillars = [];
+  let runsData = null;
+  let pillar = "surveillance";
   let difficulty = "medium";
+  let timerOn = false;
+  let timerPreset = "normal";
+  let showImprovised = true;
   const msg = h("div", {});
   const runs = h("div", { class: "hist-body" });
+  const settingsBox = h("div", {});
+  const diffBox = h("div", {});
+
   const startBtn = h("button", { class: "btn btn--primary", type: "button", onclick: async () => {
     startBtn.disabled = true;
     msg.replaceChildren();
     try {
-      const s = await api("/api/dark/start", { method: "POST", body: { difficulty } });
-      ctx.navigate(`#/dark/${s.id}`);
+      const res = await api("/api/dark/practice", { method: "POST",
+        body: { pillar, difficulty, settings: { timer: { enabled: timerOn, preset: timerPreset }, show_improvised: showImprovised } } });
+      ctx.navigate(res.runner);
     } catch (e) { render(msg, notice("error", e.message)); startBtn.disabled = false; }
-  } }, "Start run");
+  } }, "Start");
 
-  const diff = segmented("Difficulty", [["easy", "Easy"], ["medium", "Medium"], ["hard", "Hard"]],
-    difficulty, (v) => { difficulty = v; });
+  const pillarSelect = h("select", { class: "input", id: "dpillar", onchange: (e) => {
+    pillar = e.target.value; drawSettings(); drawDiff();
+  } });
+
+  function drawDiff() {
+    const p = pillars.find((x) => x.id === pillar);
+    const opts = (p ? p.difficulty : ["easy", "medium", "hard"]).map((d) => [d, d[0].toUpperCase() + d.slice(1)]);
+    render(diffBox, segmented("Difficulty", opts, difficulty, (v) => { difficulty = v; }));
+  }
+
+  function toggleRow(label, value, onChange) {
+    const sw = h("button", { type: "button", class: "switch", role: "switch",
+      "aria-checked": String(value), "aria-label": label },
+      h("span", { class: "switch__track" }, h("span", { class: "switch__thumb" })));
+    sw.addEventListener("click", () => {
+      const next = sw.getAttribute("aria-checked") !== "true";
+      sw.setAttribute("aria-checked", String(next));
+      onChange(next);
+    });
+    return h("div", { class: "switch-row" }, sw, h("span", { class: "switch__label" }, label));
+  }
+
+  function drawSettings() {
+    if (pillar !== "act_deceive") { settingsBox.replaceChildren(); return; }
+    const presetBox = h("div", {});
+    const drawPresets = () => {
+      if (!timerOn) { presetBox.replaceChildren(); return; }
+      render(presetBox, segmented("Timer", [["relaxed", "Relaxed"], ["normal", "Normal"], ["tight", "Tight"]],
+        timerPreset, (v) => { timerPreset = v; }));
+    };
+    render(settingsBox,
+      h("h3", { class: "mono small" }, "Actor settings"),
+      toggleRow("Timed scene", timerOn, (v) => { timerOn = v; drawPresets(); }),
+      presetBox,
+      toggleRow("Show which claims were improvised", showImprovised, (v) => { showImprovised = v; }));
+    drawPresets();
+  }
 
   root.append(
     topbar("s-mode", () => logout(ctx), state.user),
     h("section", { class: "page-head" },
       h("h1", {}, "S-mode"),
-      h("p", {}, "A darker wing of the gym. Its scores are called dark points and never touch your streak, your points or the leaderboard.")),
+      h("p", {}, "A darker wing of the gym. Its scores are dark points and never touch your streak, your points or the leaderboard.")),
     h("section", { class: "board-wrap" },
       h("div", { class: "panel dark-entry" },
-        h("h2", {}, "Surveillance"),
-        h("p", { class: "lede" }, "Five social points, three secrets they won't hand over for free. Pick your approach badly and the door closes."),
-        h("div", { class: "field" }, h("span", { class: "label" }, "Difficulty"), diff),
+        h("h2", {}, "Dark practice"),
+        h("p", { class: "lede" }, "Pick a pillar, pick a level, and step in. Progress saves when you leave."),
+        h("div", { class: "field" }, h("label", { for: "dpillar" }, "Pillar"), pillarSelect),
+        h("div", { class: "field" }, h("span", { class: "label" }, "Difficulty"), diffBox),
+        settingsBox,
         msg,
         h("div", { class: "row-actions" }, startBtn)),
       h("h2", {}, "Recent runs"),
@@ -65,14 +108,31 @@ export function sModeView(root, ctx) {
       h("div", { class: "row-actions" },
         h("button", { class: "btn btn--quiet", type: "button", onclick: () => exitSMode(ctx) }, "Leave S-mode"))));
 
-  api("/api/sessions/history?mode=dark&limit=8").then((d) => {
+  function drawRuns() {
+    if (!runsData) return;
+    const d = runsData;
     if (!d.entries.length) { render(runs, h("p", { class: "muted" }, "No dark runs yet.")); return; }
+    const label = (id) => (pillars.find((p) => p.id === id) || {}).label || id;
     render(runs, h("div", { class: "table-wrap" }, h("table", { class: "report" },
-      h("thead", {}, h("tr", {}, ...["Date", "Difficulty", "Outcome", "Dark points"].map((c) => h("th", {}, c)))),
+      h("thead", {}, h("tr", {}, ...["Date", "Pillar", "Level", "Outcome", "Dark points"].map((c) => h("th", {}, c)))),
       h("tbody", {}, ...d.entries.map((e) => h("tr", {},
         h("td", { class: "mono" }, e.date),
+        h("td", {}, label(e.pillar || "surveillance")),
         h("td", { class: "mono" }, e.difficulty || "-"),
         h("td", {}, OUTCOME_LABEL[e.outcome] || "-"),
         h("td", { class: "mono" }, e.total_points ?? 0)))))));
+  }
+
+  api("/api/dark/pillars").then((d) => {
+    pillars = d.pillars || [];
+    pillarSelect.replaceChildren(...pillars.map((p) => h("option", { value: p.id }, p.label)));
+    drawDiff();
+    drawSettings();
+    drawRuns();
+  }).catch((e) => render(msg, notice("error", e.message)));
+
+  api("/api/sessions/history?mode=dark&limit=8").then((d) => {
+    runsData = d;
+    drawRuns();
   }).catch((e) => render(runs, notice("error", e.message)));
 }

@@ -1,0 +1,21 @@
+You are closing out the script for a social-challenge game. The scene nodes are already written.
+
+Cast (id | name | personality):
+{{ cast }}
+
+Claims the player's answers can commit (claim id | node it appears in): {{ claims }}
+
+Produce the "check" nodes and the final verdicts as one JSON object:
+{
+  "checks": [ {"speaker": cast_id, "claims": [claim ids], "line": "...", "bluff_line": "...", "confirm_line": "...", "penalty": 1} ],
+  "verdicts": [ {"id": cast_id, "bought_it": "...", "suspicious": "...", "sees_through": "..."} ],
+  "end_line": "one closing line spoken as the scene ends"
+}
+
+Rules:
+- Every claim id listed above must appear in EXACTLY ONE check node.
+- A check is another observer comparing notes, e.g. "Jack says you worked at the Zurich institute…". Vary the speaker; do not always use the same person.
+- "bluff_line" is what they say when the claim was improvised and caught; "confirm_line" when it was backed by a studied topic.
+- "penalty" is 1, or 2 for a serious claim.
+- One verdict entry per cast id, each written in that person's voice.
+- Natural, adult, fictional; same content bans as before.

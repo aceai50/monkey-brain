@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import admin, auth, dark, internal, leaderboard, practice, sessions, users
+from app.api import admin, auth, dark, dark_act, internal, leaderboard, practice, sessions, users
 from app.core import db
 from app.core.config import settings
 
@@ -57,6 +57,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(sessions.router)
 app.include_router(dark.router)
+app.include_router(dark_act.router)
 app.include_router(practice.router)
 app.include_router(leaderboard.router)
 app.include_router(admin.router)

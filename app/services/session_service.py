@@ -19,6 +19,7 @@ from app.core.db import get_db
 from app.core.hashrng import HashRng
 from app.core.security import to_object_id
 from app.generators import BUCKETS
+from app.generators import act_deceive
 from app.generators.surveillance import SECRETS as DARK_SECRETS
 from app.services import content_orchestrator as content
 from app.services.adaptive_engine import (
@@ -393,7 +394,8 @@ async def _create_dark_with(user: dict, bucket: str, ch: dict, pool_size: int, a
 async def create_dark(user: dict, difficulty: str) -> dict:
     """Start or resume a dark run: an active run is returned untouched (leave/resume)."""
     db = get_db()
-    active = await db.sessions.find_one({"user_id": user["_id"], "mode": "dark", "state": "active"})
+    active = await db.sessions.find_one({"user_id": user["_id"], "mode": "dark",
+                                         "pillar": "surveillance", "state": "active"})
     if active is not None:
         return active
     date = today_ist()
@@ -432,7 +434,8 @@ async def dark_skip(user: dict, sid: str) -> dict:
 
 async def get_dark(user: dict, sid: str) -> dict:
     oid = to_object_id(sid, 404, "Session not found")
-    s = await get_db().sessions.find_one({"_id": oid, "user_id": user["_id"], "mode": "dark"})
+    s = await get_db().sessions.find_one(
+        {"_id": oid, "user_id": user["_id"], "mode": "dark", "pillar": "surveillance"})
     if s is None:
         raise HTTPException(404, "Session not found")
     if s["state"] == "active":   # keep skip availability in sync with today's (healing) pool
@@ -501,6 +504,348 @@ async def dark_restart(user: dict, sid: str) -> dict:
     return await create_dark(user, s["difficulty"])
 
 
+# ---------------------------------------------------------------- dark pillar: act & deceive
+ACT_PILLAR = "act_deceive"
+ACT_PRESETS = {"relaxed": 30, "normal": 20, "tight": 12}
+DARK_PILLARS = {
+    "surveillance": {"label": "Surveillance", "difficulty": list(DARK_BUCKETS), "runner": "#/dark/{id}"},
+    ACT_PILLAR: {"label": "Act & Deceive", "difficulty": list(DARK_BUCKETS), "runner": "#/act/{id}"},
+}
+
+
+def _act_settings(raw) -> dict:
+    raw = raw or {}
+    timer = raw.get("timer") or {}
+    preset = timer.get("preset") if timer.get("preset") in ACT_PRESETS else "normal"
+    return {"enabled": bool(timer.get("enabled")), "preset": preset, "seconds": ACT_PRESETS[preset],
+            "show_improvised": bool(raw.get("show_improvised", True))}
+
+
+async def _face_url(label: str) -> str:
+    face = await get_db().faces.find_one({"_id": label})
+    return (f"/static/img/faces/{face['filename']}" if face
+            else f"/static/img/faces/{label}.jpg")
+
+
+def _act_deadline(act: dict):
+    if act["timer"]["enabled"]:
+        return now_utc() + timedelta(seconds=act["timer"]["seconds"])
+    return None
+
+
+def act_public(s: dict) -> dict:
+    act = s["act"]
+    sc = s["scenario"]
+    out = {
+        "id": str(s["_id"]), "mode": "dark", "pillar": ACT_PILLAR, "state": s["state"],
+        "phase": act["phase"], "difficulty": s["difficulty"], "turns": sc["turns"],
+        "max_doubt": act_deceive.MAX_DOUBT, "image_url": s.get("image_url"),
+        "pool_size": int(s.get("pool_size") or 1), "can_skip": int(s.get("pool_size") or 1) > 1,
+        "show_improvised": act["show_improvised"],
+        "timer": {"enabled": act["timer"]["enabled"], "preset": act["timer"]["preset"],
+                  "seconds": act["timer"]["seconds"]},
+        "outcome": act.get("outcome"), "server_now": now_utc().isoformat(),
+    }
+    if act["timer"]["enabled"] and act.get("deadline_at"):
+        left = max(0.0, (aware(act["deadline_at"]) - now_utc()).total_seconds())
+        out["timer"]["seconds_left"] = round(left, 1)
+    if act["phase"] == "prep":
+        out.update({
+            "cover": sc["cover"],
+            "cast": [{"id": c["id"], "name": c["name"], "role": c["role"], "hint": c["hint"],
+                      "image_url": s.get("cast_media", {}).get(c["id"])} for c in sc["cast"]],
+            "topics": sc["topics"], "prep_cards": sc["prep_cards"],
+            "tags": sc["tags"], "pick": act_deceive.PREP_PICK,
+        })
+        return out
+    if act["phase"] == "finished":
+        out["node"] = None
+        out["report"] = s.get("report")
+        return out
+    node = sc["nodes"][act["node_id"]]
+    cast = {c["id"]: c for c in sc["cast"]}
+    speaker = cast.get(node.get("speaker")) or {}
+    order = act["order"].get(node["id"]) or list(range(len(node["options"])))
+    out.update({
+        "doubt": act["doubt"], "turn": act["turn"],
+        "cast": [{"id": c["id"], "name": c["name"], "role": c["role"],
+                  "image_url": s.get("cast_media", {}).get(c["id"]),
+                  "speaking": c["id"] == node.get("speaker")} for c in sc["cast"]],
+        "node": {"speaker": speaker.get("name"), "speaker_id": node.get("speaker"),
+                 "line": node["line"],
+                 "options": [{"key": str(i), "text": node["options"][i]["text"],
+                              "tag": node["options"][i]["tag"],
+                              "topic_chip": (next((t["name"] for t in sc["topics"]
+                                                   if t["id"] == node["options"][i]["topic"]), None)
+                                             if node["options"][i]["topic"] in act["studied"] else None)}
+                             for i in order]},
+        "ledger": [{"text": e["text"], "to": e["to"],
+                    "improvised": e["improvised"] if act["show_improvised"] else None}
+                   for e in act["ledger"].values()],
+        "caught": len(act["caught"]),
+    })
+    return out
+
+
+async def _create_act_with(user: dict, bucket: str, sc: dict, pool_size: int, settings: dict,
+                           attempt: int = 1) -> dict:
+    db = get_db()
+    cast_media = {c["id"]: await _face_url(c.get("image_label") or sc["image_label"]) for c in sc["cast"]}
+    seed = uuid.uuid4().hex
+    order = {nid: HashRng("act", seed, nid).shuffle(list(range(len(n["options"]))))
+             for nid, n in sc["nodes"].items() if n.get("kind") == "scene"}
+    doc = {
+        "_id": ObjectId(), "user_id": user["_id"], "date": today_ist(), "mode": "dark", "pillar": ACT_PILLAR,
+        "difficulty": bucket, "state": "active", "scenario": sc,
+        "image_url": await _face_url(sc["image_label"]), "cast_media": cast_media, "pool_size": pool_size,
+        "act": {"phase": "prep", "studied": [], "doubt": 0, "vague_streak": 0, "vague_count": 0,
+                "turn": 0, "node_id": "n1", "ledger": {}, "caught": [], "wasted": 0, "log": [],
+                "suspicion": {c["id"]: 0 for c in sc["cast"]},
+                "timer": {"enabled": settings["enabled"], "preset": settings["preset"],
+                          "seconds": settings["seconds"]},
+                "show_improvised": settings["show_improvised"], "deadline_at": None,
+                "attempt": attempt, "seed": seed, "order": order, "outcome": None},
+        "created_at": now_utc(), "finished_at": None, "report": None,
+    }
+    await db.sessions.insert_one(doc)
+    return doc
+
+
+async def create_act(user: dict, difficulty: str, settings: dict | None = None) -> dict:
+    db = get_db()
+    active = await db.sessions.find_one({"user_id": user["_id"], "mode": "dark",
+                                         "pillar": ACT_PILLAR, "state": "active"})
+    if active is not None:
+        return active
+    date = today_ist()
+    bucket = difficulty if difficulty in DARK_BUCKETS else "medium"
+    pool = await content.resolve_act(date)
+    items = pool.get(bucket) or pool.get("medium") or []
+    if not items:
+        raise HTTPException(503, "No Act & Deceive scenarios are available yet.")
+    seen = set(await db.sessions.distinct("scenario.id", {"user_id": user["_id"], "mode": "dark",
+                                                          "pillar": ACT_PILLAR, "state": "finished"}))
+    fresh = [s for s in items if s["id"] not in seen] or items
+    runs = await db.sessions.count_documents({"user_id": user["_id"], "mode": "dark", "pillar": ACT_PILLAR})
+    sc = fresh[runs % len(fresh)]
+    return await _create_act_with(user, bucket, sc, len(items), _act_settings(settings), attempt=runs + 1)
+
+
+async def get_act(user: dict, sid: str) -> dict:
+    oid = to_object_id(sid, 404, "Session not found")
+    s = await get_db().sessions.find_one(
+        {"_id": oid, "user_id": user["_id"], "mode": "dark", "pillar": ACT_PILLAR})
+    if s is None:
+        raise HTTPException(404, "Session not found")
+    if s["state"] == "active":
+        pool = await content.resolve_act(today_ist())
+        n = len(pool.get(s["difficulty"]) or [])
+        if n and n != s.get("pool_size"):
+            s["pool_size"] = n
+            await get_db().sessions.update_one({"_id": s["_id"]}, {"$set": {"pool_size": n}})
+    return s
+
+
+async def act_prep(user: dict, sid: str, topic_ids: list[str]) -> dict:
+    s = await get_act(user, sid)
+    if s["state"] != "active" or s["act"]["phase"] != "prep":
+        raise HTTPException(409, "This run is not in prep")
+    sc = s["scenario"]
+    picked = [str(t) for t in topic_ids]
+    allowed = set(sc["prep_cards"])
+    if (len(set(picked)) != act_deceive.PREP_PICK or len(picked) != act_deceive.PREP_PICK
+            or not set(picked) <= allowed):
+        raise HTTPException(400, f"Pick exactly {act_deceive.PREP_PICK} topics")
+    act = s["act"]
+    act.update({"phase": "scene", "studied": picked, "node_id": "n1", "turn": 0,
+                "deadline_at": _act_deadline(act)})
+    await get_db().sessions.update_one(
+        {"_id": s["_id"], "user_id": user["_id"], "act.phase": "prep"},
+        {"$set": {"act": act}})
+    s["act"] = act
+    return s
+
+
+def _finish_act(act: dict, sc: dict) -> dict:
+    fin = act_deceive.finish(act, sc)
+    act["outcome"] = fin["outcome"]
+    act["phase"] = "finished"
+    return fin
+
+
+def _act_report(s: dict, fin: dict) -> dict:
+    act, sc = s["act"], s["scenario"]
+    committed = list(act["ledger"].values())
+    survived = sum(1 for e in committed if e.get("survived") is True)
+    composure = (act_deceive.MAX_DOUBT - act["doubt"]) / act_deceive.MAX_DOUBT
+    convinced = fin["bought"] / max(1, len(sc["cast"]))
+    survived_bluffs = survived / max(1, len(committed))
+    efficiency = max(0.0, 1 - act["wasted"] / max(1, sc["turns"]))
+    score = round(100 * (0.4 * composure + 0.3 * convinced + 0.2 * survived_bluffs + 0.1 * efficiency))
+    cast = {c["id"]: c for c in sc["cast"]}
+    return {
+        "mode": "dark", "pillar": ACT_PILLAR, "outcome": act["outcome"], "dark_points": score,
+        "doubt_left": act["doubt"], "max_doubt": act_deceive.MAX_DOUBT, "turns": sc["turns"],
+        "wasted": act["wasted"], "cover": sc["cover"],
+        "verdicts": [{"id": cid, "name": cast[cid]["name"], "band": band,
+                      "line": (sc["verdicts"].get(cid) or {}).get(band, "")}
+                     for cid, band in fin["verdicts"].items()],
+        "ledger": [{"text": e["text"], "to": e["to"], "improvised": e["improvised"],
+                    "survived": e.get("survived")} for e in committed],
+        "log": act["log"],
+    }
+
+
+async def act_choose(user: dict, sid: str, key: str) -> dict:
+    s = await get_act(user, sid)
+    if s["state"] != "active" or s["act"]["phase"] != "scene":
+        raise HTTPException(409, "This scene is not live")
+    act, sc = s["act"], s["scenario"]
+    node = sc["nodes"][act["node_id"]]
+    try:
+        oi = int(key)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Bad option")
+    if not 0 <= oi < len(node["options"]):
+        raise HTTPException(400, "Bad option")
+    option = node["options"][oi]
+    cast = {c["id"]: c for c in sc["cast"]}
+    better = None
+    for cand in node["options"]:
+        if cand["kind"] != "evade" and act_deceive.eval_cond(
+                cand["works_if"], {"studied": set(act["studied"]), "vague_streak": act["vague_streak"],
+                                   "speaker": node.get("speaker"),
+                                   "personality": (cast.get(node.get("speaker")) or {}).get("personality"),
+                                   "ledger": act["ledger"], "turn": act["turn"], "doubt": act["doubt"]}):
+            better = cand["text"]
+            break
+    reaction = act_deceive.apply_option(act, sc, node, option)
+    if not reaction["ok"]:
+        act["wasted"] += 1
+    for cid in option.get("commits") or []:
+        act["ledger"][cid]["text"] = option["text"]
+        act["ledger"][cid]["to"] = cast[node["speaker"]]["name"] if node.get("speaker") in cast else "the room"
+    act["log"].append({
+        "turn": act["turn"], "node": node["id"],
+        "speaker": cast.get(node.get("speaker"), {}).get("name", ""), "line": node["line"],
+        "chosen": option["text"], "tag": option["tag"], "ok": reaction["ok"],
+        "delta": reaction["delta"], "doubt_after": act["doubt"], "better": better,
+        "reaction": reaction["line"],
+    })
+    nxt = node["next"]
+    while nxt and sc["nodes"][nxt]["kind"] == "check":
+        chk = sc["nodes"][nxt]
+        res = act_deceive.run_check(act, chk)
+        act["log"].append({"turn": act["turn"], "node": chk["id"], "check": True,
+                           "speaker": cast.get(chk.get("speaker"), {}).get("name", ""),
+                           "line": chk["line"], "text": res["line"], "caught": res["caught"],
+                           "doubt_after": act["doubt"]})
+        nxt = chk["next"]
+    fin = None
+    if act["doubt"] >= act_deceive.MAX_DOUBT:
+        fin = _finish_act(act, sc)
+    elif not nxt or sc["nodes"][nxt]["kind"] == "end":
+        if nxt:
+            act["log"].append({"turn": act["turn"], "node": nxt, "check": False,
+                               "speaker": "", "line": sc["nodes"][nxt]["line"], "text": "",
+                               "caught": [], "doubt_after": act["doubt"]})
+        fin = _finish_act(act, sc)
+    else:
+        act["node_id"] = nxt
+        act["deadline_at"] = _act_deadline(act)
+    sets = {"act": act}
+    if fin is not None:
+        sets.update({"state": "finished", "finished_at": now_utc()})
+        sets["report"] = _act_report({**s, "act": act}, fin)
+    out = await get_db().sessions.find_one_and_update(
+        {"_id": s["_id"], "user_id": user["_id"], "state": "active"}, {"$set": sets},
+        return_document=ReturnDocument.AFTER)
+    if out is None:
+        out = await get_act(user, sid)
+    return out
+
+
+async def act_timeout(user: dict, sid: str) -> dict:
+    s = await get_act(user, sid)
+    if s["state"] != "active" or s["act"]["phase"] != "scene":
+        raise HTTPException(409, "This scene is not live")
+    act = s["act"]
+    act["doubt"] = min(act_deceive.MAX_DOUBT, act["doubt"] + 1)
+    act["vague_streak"] += 1
+    act["log"].append({"turn": act["turn"], "node": act["node_id"], "stammer": True,
+                       "speaker": "", "line": "…", "text": "You hesitated too long.",
+                       "caught": [], "doubt_after": act["doubt"]})
+    fin = None
+    if act["doubt"] >= act_deceive.MAX_DOUBT:
+        fin = _finish_act(act, s["scenario"])
+    else:
+        act["deadline_at"] = _act_deadline(act)
+    sets = {"act": act}
+    if fin is not None:
+        sets.update({"state": "finished", "finished_at": now_utc()})
+        sets["report"] = _act_report({**s, "act": act}, fin)
+    out = await get_db().sessions.find_one_and_update(
+        {"_id": s["_id"], "user_id": user["_id"], "state": "active"}, {"$set": sets},
+        return_document=ReturnDocument.AFTER)
+    return out or await get_act(user, sid)
+
+
+async def act_skip(user: dict, sid: str) -> dict:
+    s = await get_act(user, sid)
+    if s["state"] != "active":
+        raise HTTPException(409, "This run is already over")
+    bucket = s["difficulty"]
+    pool = await content.resolve_act(today_ist())
+    items = pool.get(bucket) or pool.get("medium") or []
+    if len(items) < 2:
+        raise HTTPException(409, "There is no other scenario to skip to")
+    cur_id = s["scenario"]["id"]
+    idx = next((i for i, sc in enumerate(items) if sc["id"] == cur_id), -1)
+    nxt = items[(idx + 1) % len(items)]
+    settings = {"enabled": s["act"]["timer"]["enabled"], "preset": s["act"]["timer"]["preset"],
+                "seconds": s["act"]["timer"]["seconds"], "show_improvised": s["act"]["show_improvised"]}
+    await get_db().sessions.delete_one(
+        {"_id": s["_id"], "user_id": user["_id"], "mode": "dark", "pillar": ACT_PILLAR, "state": "active"})
+    return await _create_act_with(user, bucket, nxt, len(items), settings)
+
+
+async def act_restart(user: dict, sid: str) -> dict:
+    s = await get_act(user, sid)
+    if s["state"] == "active":
+        raise HTTPException(409, "Finish the current scene first")
+    settings = {"enabled": s["act"]["timer"]["enabled"], "preset": s["act"]["timer"]["preset"],
+                "seconds": s["act"]["timer"]["seconds"], "show_improvised": s["act"]["show_improvised"]}
+    return await create_act(user, s["difficulty"], settings)
+
+
+# ---------------------------------------------------------------- unified dark practice
+async def create_dark_run(user: dict, pillar: str, difficulty: str, settings: dict | None = None):
+    """Practice-style entry point: pick a dark pillar, get a (resumable) run and its route."""
+    if pillar not in DARK_PILLARS:
+        raise HTTPException(400, "Unknown dark pillar")
+    if pillar == "surveillance":
+        doc = await create_dark(user, difficulty)
+    else:
+        doc = await create_act(user, difficulty, settings)
+    return doc, DARK_PILLARS[pillar]["runner"].format(id=str(doc["_id"]))
+
+
+async def dark_pillars_payload(user: dict) -> dict:
+    db = get_db()
+    active = await db.sessions.find({"user_id": user["_id"], "mode": "dark", "state": "active"}).to_list(10)
+    by_pillar = {}
+    for s in active:
+        by_pillar.setdefault(s.get("pillar"), []).append(
+            {"id": str(s["_id"]), "phase": (s.get("act") or {}).get("phase") or "active"})
+    return {
+        "pillars": [{"id": pid, "label": meta["label"], "difficulty": meta["difficulty"],
+                     "settings": ({"timer": list(ACT_PRESETS), "ledger": True}
+                                  if pid == ACT_PILLAR else {})}
+                    for pid, meta in DARK_PILLARS.items()],
+        "active": by_pillar,
+    }
+
+
 # ---------------------------------------------------------------- history
 HISTORY_WINDOW = 30
 HISTORY_PAGE_MAX = 366
@@ -513,12 +858,28 @@ def _finished_query(user: dict, mode: str = "circuit") -> dict:
 def _day_entry(s: dict) -> dict:
     rep = s.get("report") or {}
     if s["mode"] == "dark":
+        pillar = s.get("pillar") or "surveillance"
+        if pillar == ACT_PILLAR:
+            verdicts = rep.get("verdicts") or []
+            bought = sum(1 for v in verdicts if v.get("band") == "bought_it")
+            offered = max(1, len(verdicts))
+            pts = rep.get("dark_points") or 0
+            return {
+                "date": s["date"], "difficulty": s.get("difficulty"), "total_points": pts,
+                "level_avg": None, "streak": None, "outcome": rep.get("outcome"),
+                "pillar": pillar,
+                "questions_solved": bought, "questions_offered": offered, "dark": True,
+                "pillars": [{"pillar": ACT_PILLAR, "level": s.get("difficulty"), "correct": bought,
+                             "offered": offered, "accuracy": round(bought / offered, 3),
+                             "score": pts, "weight": None, "volume": None, "points": pts, "review": []}],
+            }
         found = rep.get("found") or {}
         n = sum(1 for k in DARK_SECRETS if found.get(k))
         pts = rep.get("dark_points") or 0
         return {
             "date": s["date"], "difficulty": s.get("difficulty"), "total_points": pts,
             "level_avg": None, "streak": None, "outcome": rep.get("outcome"),
+            "pillar": "surveillance",
             "questions_solved": n, "questions_offered": len(DARK_SECRETS), "dark": True,
             "pillars": [{"pillar": "surveillance", "level": s.get("difficulty"), "correct": n,
                          "offered": len(DARK_SECRETS), "accuracy": round(n / len(DARK_SECRETS), 3),

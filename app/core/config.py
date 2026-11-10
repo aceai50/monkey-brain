@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     gemini_solver_model: str = "gemini-2.5-flash-lite"
     gemini_call_timeout_s: int = 60
+    # Groq Cloud fallback (OpenAI-compatible). Free tier: gpt-oss-120b ~1K req/day, 8K TPM.
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-120b"
+    groq_fallback_model: str = "openai/gpt-oss-20b"
+    groq_min_interval_s: float = 30.0     # small chunked requests: ~2/min stays under 8K TPM
+    groq_max_completion_tokens: int = 4096
+    groq_reasoning_effort: str = "low"    # gpt-oss/qwen: spend tokens on JSON, not hidden reasoning
+    generation_pace_s: float = 10.0       # pause between pillars in a multi-pillar run
     internal_cron_secret: str = ""
     s_mode_enabled: bool = True
 

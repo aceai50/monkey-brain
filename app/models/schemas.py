@@ -123,10 +123,20 @@ class FaceRenameIn(BaseModel):
 
 
 class GenerateIn(BaseModel):
-    pillar: Literal["all", "critical", "art", "surveillance"]
+    pillar: Literal["all", "critical", "art", "surveillance", "act_deceive"]
     force: bool = True
     count: int = Field(default=1, ge=1, le=10)
     append: bool = False
+
+
+class DarkPracticeIn(BaseModel):
+    pillar: Literal["surveillance", "act_deceive"]
+    difficulty: Literal["easy", "medium", "hard"] = "medium"
+    settings: dict = Field(default_factory=dict)
+
+
+class ActPrepIn(BaseModel):
+    topic_ids: list[str] = Field(min_length=3, max_length=3)
 
 
 class TrialIn(BaseModel):

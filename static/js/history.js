@@ -5,9 +5,11 @@ import { h, notice, render, toast, topbar } from "./dom.js";
 const PILLAR_LABEL = {
   arithmetic: "Arithmetic", critical: "Critical thinking", pattern: "Pattern recognition",
   art: "Art and perspective", kinesthetic: "Reflexes", surveillance: "Surveillance",
+  act_deceive: "Act & Deceive",
 };
-const PILLAR_ORDER = ["arithmetic", "critical", "pattern", "art", "kinesthetic", "surveillance"];
-const OUTCOME_LABEL = { success: "mission successful", bored: "they got bored", burned: "burned out" };
+const PILLAR_ORDER = ["arithmetic", "critical", "pattern", "art", "kinesthetic", "surveillance", "act_deceive"];
+const OUTCOME_LABEL = { success: "mission successful", bored: "they got bored", burned: "burned out",
+  convinced: "convinced the room", partial: "partly convincing", busted: "busted" };
 
 function segmented(name, options, value, onChange) {
   const wrap = h("div", { class: "segmented", role: "radiogroup", "aria-label": name });

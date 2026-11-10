@@ -1,0 +1,29 @@
+Continue the scene script for a social-challenge game. It must read like a NATURAL conversation: each observer speaks in their own voice, reacts to what was just said, and probes in their own way. Never sound like a quiz; never mention mechanics.
+
+Cast (id | name | personality | role):
+{{ cast }}
+
+Topics (id | name): {{ topics }}
+Move tags the player will SEE (use 4 DIFFERENT tags per turn): {{ tags }}
+Already used topics (avoid repeating): {{ used }}
+
+Previous lines in the conversation (continue naturally from these):
+{{ prior }}
+
+Write exactly {{ count }} consecutive scene nodes. Return JSON: {"nodes": [ ... ]}.
+
+Each node: "id" (any string), "speaker" (a cast id), "line" (the spoken line), and "options": exactly 4.
+Every node has exactly one option of each hidden kind:
+- "commit": a specific claim about a topic; set "topic" to a topic id. Works if the player studied it; otherwise it becomes an improvised claim that a later check will catch.
+- "evade": a vague non-answer. Works early; fails after two evasions in a row.
+- "risk": a bold claim; "doubt_on_success" must be -1 and it is the ONLY move that lowers doubt. It always counts as an improvised claim. Gate it with a condition.
+- "redirect": turn the question back or to someone else. Gate it with a condition.
+Each option: "text" (player voice, max 160 chars), "tag" (from the tag list), "kind", "topic" (commit only, else null), "commits" (claim ids for commit/risk), "works_if" (1-2 atoms, ALL must hold), "doubt_on_success" (0 or -1 for risk), "doubt_on_fail" (1, or 2 for a failed risk), "line_if_pass", "line_if_fail", "rationale" (one sentence, review only).
+
+Condition atoms (use ONLY these): {"studied": topic_id} {"not_studied": topic_id} {"vague_streak_lt": n} {"target": cast_id} {"target_personality": "curious|skeptical|narcissist|formal|hostile"} {"claim_present": claim_id} {"claim_absent": claim_id} {"turn_lt": n} {"doubt_lt": n}
+
+Rules:
+- Do NOT include "next" — the engine chains the nodes.
+- The working kind must VARY across the conversation: no kind should be the winning one every turn; risk/redirect need conditions that are sometimes false.
+- Claim ids look like c_short_snake_case; they will be checked later.
+- Adult, fictional social setting. Same content bans as before.
