@@ -8,7 +8,7 @@ from app.core import db as dbmod
 from app.core import rate_limit
 from app.generators.surveillance import BANK, SECRETS, bank_pool, validate_character
 from app.main import app
-from app.services import leaderboard_service, seats
+from app.services import content_orchestrator as co, leaderboard_service, seats
 
 SENT: dict[str, str] = {}
 
@@ -25,6 +25,7 @@ async def client(monkeypatch):
     leaderboard_service.invalidate()
     monkeypatch.setattr(auth_api, "send_set_password_email", fake_send)
     await seats.reconcile()
+    co._STACK_CACHE.clear()
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
         yield c
 
@@ -151,27 +152,27 @@ def _clone_chars():
     return out
 
 
-async def test_skip_cycles_characters_and_discards_the_run(client, monkeypatch):
+async def test_dark_stack_navigation_next_prev_and_clamp(client, monkeypatch):
+    from app.core.clock import today_ist
     from app.services import session_service as svc
     chars = _clone_chars()
 
-    async def fake_pool(date):
-        return {"easy": chars, "medium": chars, "hard": chars}
+    async def fake_stack(pillar, bucket, days=7):
+        return [{"scenario": c, "date": today_ist(), "index": i} for i, c in enumerate(chars)]
 
-    monkeypatch.setattr(svc.content, "resolve_surveillance", fake_pool)
+    monkeypatch.setattr(svc.content, "dark_stack", fake_stack)
     h = await signup(client, "s1@example.com", "skip1")
     s = (await client.post("/api/dark/start", json={"difficulty": "easy"}, headers=h)).json()
-    assert s["can_skip"] is True and s["pool_size"] == 3
-    ids, names = [s["id"]], [s["name"]]
-    for _ in range(3):
-        r = await client.post(f"/api/dark/{ids[-1]}/skip", headers=h)
-        assert r.status_code == 201, r.text
-        n = r.json()
-        ids.append(n["id"])
-        names.append(n["name"])
-    assert len(set(ids)) == 4
-    assert names == ["Aaa", "Bbb", "Ccc", "Aaa"]          # cyclic
-    assert await dbmod.get_db().sessions.count_documents({"mode": "dark"}) == 1
+    assert s["name"] == "Aaa" and s["pool_size"] == 3
+    assert s["can_next"] is True and s["can_prev"] is False
+    n1 = (await client.post(f"/api/dark/{s['id']}/next", headers=h)).json()
+    assert n1["name"] == "Bbb" and n1["can_next"] and n1["can_prev"]
+    n2 = (await client.post(f"/api/dark/{n1['id']}/next", headers=h)).json()
+    assert n2["name"] == "Ccc" and n2["can_next"] is False
+    assert (await client.post(f"/api/dark/{n2['id']}/next", headers=h)).status_code == 409   # clamped
+    back = (await client.post(f"/api/dark/{n2['id']}/prev", headers=h)).json()
+    assert back["name"] == "Bbb"
+    assert await dbmod.get_db().sessions.count_documents({"mode": "dark"}) == 1   # only current survives
 
 
 async def test_skip_is_unavailable_with_one_character_and_after_finishing(client):

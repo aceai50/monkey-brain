@@ -52,3 +52,15 @@ async def skip(sid: str, user: dict = Depends(get_profiled_user)):
     """Discard this character and start the next one in the pool (cyclic)."""
     rate_limit("dark-skip", str(user["_id"]), 200, 3600)
     return svc.dark_public(await svc.dark_skip(user, sid))
+
+
+@router.post("/{sid}/next", status_code=201)
+async def next_scenario(sid: str, user: dict = Depends(get_profiled_user)):
+    rate_limit("dark-skip", str(user["_id"]), 200, 3600)
+    return svc.dark_public(await svc.dark_step(user, sid, "next"))
+
+
+@router.post("/{sid}/prev", status_code=201)
+async def prev_scenario(sid: str, user: dict = Depends(get_profiled_user)):
+    rate_limit("dark-skip", str(user["_id"]), 200, 3600)
+    return svc.dark_public(await svc.dark_step(user, sid, "prev"))

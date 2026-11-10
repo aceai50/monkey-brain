@@ -4,6 +4,7 @@ import { h, notice, render, toast, topbar } from "./dom.js";
 
 const OUTCOME = { convinced: "Mission successful.", partial: "Half the room bought it.", busted: "Busted." };
 const BAND = { bought_it: "Bought it", suspicious: "Suspicious", sees_through: "Saw through you" };
+const MOVE_INTENT = "Every answer is a move: a fact you assert, a smooth non-answer, a bold claim, or turning it back on them. Some land, some don't — read the person, not the label.";
 
 export function actView(root, ctx) {
   const sid = ctx.arg;
@@ -78,6 +79,7 @@ export function actView(root, ctx) {
         h("div", {}, h("strong", {}, c.name), h("p", { class: "muted small" }, c.role),
           h("p", { class: "small mono" }, c.hint))))),
       h("p", { class: "muted small mono" }, "Moves in this room: " + (s.tags || []).join(" · ")),
+      h("p", { class: "muted small" }, MOVE_INTENT),
       h("h2", {}, `Cram — study ${s.pick} of ${s.topics.length}`),
       h("div", { class: "act-topics" }, ...cards),
       h("div", { class: "row-actions" }, startBtn));
@@ -88,17 +90,20 @@ export function actView(root, ctx) {
   function drawScene() {
     const doubtPips = Array.from({ length: s.max_doubt }, (_, i) =>
       h("span", { class: "act-doubt" + (i < s.doubt ? " is-on" : "") }));
+    const stepBtn = (label, dir, enabled) => {
+      const b = h("button", { class: "btn btn--quiet", type: "button", disabled: !enabled }, label);
+      b.addEventListener("click", async () => {
+        b.disabled = true;
+        try { const n = await api(`/api/dark/act/${sid}/${dir}`, { method: "POST" }); ctx.navigate(`#/act/${n.id}`); }
+        catch (e) { toast(e.message); b.disabled = false; }
+      });
+      return b;
+    };
     render(stage,
       h("div", { class: "row-actions surv-top" },
-        s.can_skip ? h("button", { class: "btn btn--quiet", type: "button", onclick: (e) => {
-          const b = e.currentTarget;
-          if (b.dataset.armed !== "1") {
-            b.dataset.armed = "1"; b.textContent = "Skip? Click again";
-            setTimeout(() => { b.dataset.armed = ""; b.textContent = "Skip to next scenario"; }, 3000);
-            return;
-          }
-          call(`/api/dark/act/${sid}/skip`, {}).then(() => { if (s && s.id) ctx.navigate(`#/act/${s.id}`); });
-        } }, "Skip to next scenario") : null,
+        stepBtn("Previous", "prev", s.can_prev),
+        h("span", { class: "mono small muted" }, `Scenario ${(s.stack_index ?? 0) + 1} / ${s.pool_size ?? 1}`),
+        stepBtn("Next", "next", s.can_next),
         h("a", { class: "link-btn", href: "#/s-mode" }, "Leave (progress is saved)")),
       h("div", { class: "act-hud" },
         h("div", { class: "act-hud__doubt" }, h("span", { class: "mono small muted" }, "Doubt"), ...doubtPips),
@@ -110,7 +115,12 @@ export function actView(root, ctx) {
           onerror: (e) => e.target.replaceWith(h("span", { class: "act-face act-face--alt" }, c.name.slice(0, 2).toUpperCase())) })
           : h("span", { class: "act-face act-face--alt" }, c.name.slice(0, 2).toUpperCase()),
         h("span", { class: "mono small" }, c.name)))),
-      h("div", { class: "bubble bubble--them act-line" }, s.node.line),
+      h("div", { class: "surv-chat", "aria-live": "polite" },
+        ...(s.transcript || []).map((m) => m.role === "system"
+          ? h("div", { class: "bubble bubble--sys" }, m.text)
+          : h("div", { class: "bubble bubble--" + (m.role === "me" ? "me" : "them") },
+              (m.speaker ? m.speaker + ": " : "") + m.text)),
+        h("div", { class: "bubble bubble--them" }, s.node.line)),
       h("div", { class: "surv-options" }, ...s.node.options.map((o) =>
         h("button", { class: "btn surv-option", type: "button", onclick: () => call(`/api/dark/act/${sid}/choose`, { key: o.key }) },
           h("span", { class: "surv-option__text" }, o.text),
@@ -174,10 +184,14 @@ export function actView(root, ctx) {
           }
           return h("details", { class: "review" + (e.ok ? " is-right" : " is-wrong") },
             h("summary", {}, `${e.speaker}: "${e.line}"`),
-            h("p", {}, `You: "${e.chosen}" `), 
+            h("p", {}, `You: "${e.chosen}"`),
             h("p", { class: "mono small" }, `${e.tag} · ${e.delta >= 0 ? "+" : ""}${e.delta} doubt (${e.doubt_after} total)`),
-            h("p", { class: "small" }, e.reaction || ""),
-            e.ok ? null : h("p", { class: "small" }, `A better read: "${e.better || "pick a different approach."}"`));
+            e.reaction ? h("p", { class: "small" }, `${e.speaker}: "${e.reaction}"`) : null,
+            e.ok ? null : h("p", { class: "small" }, `A better read: "${e.better || "pick a different approach."}"`),
+            (e.options && e.options.length) ? h("ul", { class: "small act-intent" },
+              ...e.options.map((o, i) => h("li", { class: i === e.ideal ? "is-ideal" : (o.works ? "" : "is-miss") },
+                h("strong", {}, `${o.tag}${i === e.ideal ? " · ideal" : o.works ? " · would work" : ""}`),
+                " — ", o.rationale))) : null);
         })),
       h("div", { class: "row-actions" },
         h("button", { class: "btn btn--primary", type: "button", onclick: async () => {

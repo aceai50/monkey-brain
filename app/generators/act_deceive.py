@@ -22,6 +22,13 @@ TAG_RE = re.compile(r"^[a-z][a-z '\-]{1,23}$")
 MIN_SCENE_NODES = 4
 MAX_SCENE_NODES = 12
 MIN_TAGS, MAX_TAGS = 4, 6
+# Fallback "why" shown in the review when the author didn't supply one (offline bank).
+KIND_WHY = {
+    "commit": "assert a concrete fact about this topic — safe only if you actually studied it",
+    "evade": "a smooth non-answer — harmless early, but three in a row reads as guilty",
+    "risk": "a bold claim — the only move that can lower doubt, but it needs the right person",
+    "redirect": "turn the question back on them or someone else — works on the right personality",
+}
 
 
 def _txt(v, limit: int) -> str:
@@ -340,7 +347,8 @@ def validate_scenario(raw, difficulty: str, key: int) -> dict | None:
                 built.append({"kind": kind, "tag": tag, "topic": topic, "text": _txt(o.get("text"), 160),
                               "commits": commits, "works_if": cond, "doubt_on_success": ds,
                               "doubt_on_fail": df, "line_if_pass": _txt(o.get("line_if_pass"), 200),
-                              "line_if_fail": _txt(o.get("line_if_fail"), 200)})
+                              "line_if_fail": _txt(o.get("line_if_fail"), 200),
+                              "rationale": _txt(o.get("rationale"), 200) or KIND_WHY.get(kind, "")})
             if any(not o["text"] or not o["line_if_pass"] or not o["line_if_fail"] for o in built):
                 return None
             scene_count += 1

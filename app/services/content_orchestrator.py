@@ -9,6 +9,7 @@ Stage 2 (background, may fail): Gemini critical-thinking pool, guarded by an own
 import asyncio
 import json
 import logging
+import time
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -16,7 +17,7 @@ from pathlib import Path
 from fastapi.concurrency import run_in_threadpool
 from pymongo.errors import DuplicateKeyError
 
-from app.core.clock import now_utc, shift_date
+from app.core.clock import now_utc, shift_date, today_ist
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.hashrng import stable_key
@@ -498,6 +499,7 @@ async def generate_surveillance(date: str, count: int = SURV_DEFAULT, append: bo
             {"_id": date, "surv_lock.owner": token},
             {"$set": {"pools.surveillance": pools, "sources.surveillance": sources, "surv_meta": meta,
                       "surv_ready": True, "updated_at": now_utc(), "surv_last_error": None, "surv_lock": None}})
+        _invalidate_dark_stack("surveillance")
         return "ready" if res.modified_count else "skipped"
     except Exception as e:  # noqa: BLE001
         doc = await col.find_one({"_id": date}, {"surv_attempts": 1}) or {}
@@ -514,6 +516,52 @@ def _surv_shape_ok(c: dict) -> bool:
         return False
     return all(isinstance(o.get("tag"), str) and o.get("outcome") in ("optimal", "neutral", "bad")
                for n in c["nodes"].values() for o in (n.get("options") or []))
+
+
+# ---------------------------------------------------------------- dark scenario stack
+DARK_WINDOW_DAYS = 7
+_STACK_TTL_S = 60.0
+_STACK_CACHE: dict[tuple, tuple[float, list[dict]]] = {}
+
+
+def _invalidate_dark_stack(pillar: str) -> None:
+    for k in [k for k in _STACK_CACHE if k[0] == pillar]:
+        _STACK_CACHE.pop(k, None)
+
+
+async def dark_stack(pillar: str, difficulty: str, days: int = DARK_WINDOW_DAYS) -> list[dict]:
+    """Newest-first stack of usable scenarios across the unarchived window.
+
+    Cached in-process for ~60s so cycling next/prev doesn't re-scan the DB; invalidated when
+    an admin (re)generates that pillar. Falls back to the bundled bank only if the whole
+    window has no AI content.
+    """
+    key = (pillar, difficulty, today_ist())
+    hit = _STACK_CACHE.get(key)
+    if hit and time.monotonic() < hit[0]:
+        return hit[1]
+    valid = _surv_shape_ok if pillar == "surveillance" else _act_shape_ok
+    db = get_db()
+    stack: list[dict] = []
+    for k in range(days):
+        d = shift_date(today_ist(), -k)
+        doc = await db.daily_challenges.find_one({"_id": d})
+        if not doc:
+            continue
+        src = (doc.get("sources") or {}).get(pillar)
+        if not _is_ai_source(src):
+            continue
+        pools = (doc.get("pools") or {}).get(pillar) or {}
+        for sc in pools.get(difficulty) or []:
+            if valid(sc):
+                stack.append({"scenario": sc, "date": d, "index": len(stack)})
+    if not stack:
+        idx = ("easy", "medium", "hard").index(difficulty) if difficulty in ("easy", "medium", "hard") else 1
+        bank = (surveillance.bank_pool(idx) if pillar == "surveillance" else act_deceive.bank_pool(idx))
+        for sc in bank:
+            stack.append({"scenario": sc, "date": today_ist(), "index": len(stack)})
+    _STACK_CACHE[key] = (time.monotonic() + _STACK_TTL_S, stack)
+    return stack
 
 
 async def resolve_surveillance(date: str) -> dict:
@@ -614,6 +662,7 @@ async def generate_act(date: str, count: int = 1, append: bool = False) -> str:
             {"_id": date, "ad_lock.owner": token},
             {"$set": {"pools.act_deceive": pools, "sources.act_deceive": sources, "ad_meta": meta,
                       "ad_ready": True, "updated_at": now_utc(), "ad_last_error": None, "ad_lock": None}})
+        _invalidate_dark_stack("act_deceive")
         return "ready" if res.modified_count else "skipped"
     except Exception as e:  # noqa: BLE001
         doc = await col.find_one({"_id": date}, {"ad_attempts": 1}) or {}

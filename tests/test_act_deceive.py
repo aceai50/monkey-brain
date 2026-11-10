@@ -10,7 +10,7 @@ from app.core import db as dbmod
 from app.core import rate_limit
 from app.generators import act_deceive as A
 from app.main import app
-from app.services import leaderboard_service, seats
+from app.services import content_orchestrator as co, leaderboard_service, seats
 
 SENT: dict[str, str] = {}
 
@@ -27,6 +27,7 @@ async def client(monkeypatch):
     leaderboard_service.invalidate()
     monkeypatch.setattr(auth_api, "send_set_password_email", fake_send)
     await seats.reconcile()
+    co._STACK_CACHE.clear()
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
         yield c
 
@@ -363,3 +364,45 @@ async def test_logs_window_hides_archive_until_requested(client):
     assert d1["total"] == 1 and d1["archived"] == 1 and d1["entries"][0]["provider"] == "gemini:gemini-2.5-flash"
     d2 = (await client.get("/api/admin/logs?include_archived=true", headers=h)).json()
     assert d2["total"] == 2 and d2["pages"] == 1
+
+async def test_review_shows_reaction_and_per_option_intent(client):
+    h = await signup(client, "a7@example.com", "actor7")
+    s = await _start(client, h, "act_deceive")
+    topics = [t["id"] for t in s["topics"]][:3]
+    st = (await client.post(f"/api/dark/act/{s['id']}/prep", json={"topic_ids": topics}, headers=h)).json()
+    key = await _next_key(s["id"])
+    st = (await client.post(f"/api/dark/act/{s['id']}/choose", json={"key": key}, headers=h)).json()
+    # the observer's reaction to your answer now comes back as a transcript bubble
+    assert st["phase"] in ("scene", "finished")
+    if st["phase"] == "scene":
+        roles = [m["role"] for m in st["transcript"]]
+        assert "me" in roles and "them" in roles
+    for _ in range(20):
+        if st["phase"] == "finished":
+            break
+        k = await _next_key(s["id"])
+        st = (await client.post(f"/api/dark/act/{s['id']}/choose", json={"key": k}, headers=h)).json()
+    scene = [e for e in st["report"]["log"] if e.get("options")]
+    assert scene, "report should carry per-turn option breakdowns"
+    e = scene[0]
+    assert len(e["options"]) == 4
+    assert all("rationale" in o and "works" in o for o in e["options"])
+    assert "rationale" in e and "reaction" in e
+
+async def test_dark_stack_is_newest_first_and_cached(client):
+    import copy
+    from app.core.clock import today_ist, shift_date
+    from app.generators.surveillance import bank_pool
+    co._STACK_CACHE.clear()
+    today = today_ist(); y = shift_date(today, -1)
+    base = bank_pool(0)[0]
+    for d, i in ((today, 0), (y, 1)):
+        await co.ensure_doc(d)
+        c = copy.deepcopy(base); c["id"] = f"ai-{i}"; c["name"] = f"N{i}"
+        await dbmod.get_db().daily_challenges.update_one({"_id": d}, {"$set": {
+            "pools.surveillance": {"easy": [c], "medium": [c], "hard": [c]},
+            "sources.surveillance": {"easy": "gemini:m", "medium": "gemini:m", "hard": "gemini:m"}}})
+    stack = await co.dark_stack("surveillance", "easy")
+    assert [e["date"] for e in stack] == [today, y]
+    assert stack[0]["scenario"]["name"] == "N0"
+    assert await co.dark_stack("surveillance", "easy") is stack   # cached, no re-scan

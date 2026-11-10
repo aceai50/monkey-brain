@@ -402,6 +402,11 @@ table.report tr.is-me { background: color-mix(in srgb, var(--accent) 22%, var(--
 .act-band { font: 500 0.75rem var(--font-mono); padding: 0.1rem 0.4rem; border: 1.5px solid var(--text-main); margin-left: 0.5rem; text-transform: uppercase; }
 .act-band--bought_it { border-color: var(--accent); color: var(--accent); }
 .act-band--sees_through { background: var(--text-main); color: var(--bg); }
+.bubble--sys { justify-self: center; border-style: dashed; color: var(--text-muted); font-size: 0.8125rem; }
+.act-intent { display: grid; gap: 0.35rem; margin: 0.6rem 0 0; padding-left: 1rem; }
+.act-intent li { line-height: 1.4; }
+.act-intent .is-ideal { border-left: 3px solid var(--accent); padding-left: 0.6rem; }
+.act-intent .is-miss { color: var(--text-muted); }
 
 /* ---------- admin generation jobs ---------- */
 .jobs { display: grid; gap: 0.4rem; margin-top: 0.75rem; }

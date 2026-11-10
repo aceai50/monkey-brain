@@ -79,33 +79,22 @@ export function darkView(root, ctx) {
 
   function draw() {
     if (s.state === "finished") return report();
-    let armed = false;
-    const skipBtn = s.can_skip
-      ? h("button", { class: "btn btn--quiet", type: "button" }, "Skip to next character")
-      : null;
-    if (skipBtn) {
-      skipBtn.addEventListener("click", async () => {
-        if (!armed) {
-          armed = true;
-          skipBtn.textContent = "Skip? Click again";
-          setTimeout(() => { armed = false; skipBtn.textContent = "Skip to next character"; }, 3000);
-          return;
-        }
-        skipBtn.disabled = true;
+    const step = (label, dir, enabled) => {
+      const b = h("button", { class: "btn btn--quiet", type: "button", disabled: !enabled }, label);
+      b.addEventListener("click", async () => {
+        b.disabled = true;
         try {
-          const n = await api(`/api/dark/${sid}/skip`, { method: "POST" });
+          const n = await api(`/api/dark/${sid}/${dir}`, { method: "POST" });
           ctx.navigate(`#/dark/${n.id}`);
-        } catch (e) {
-          toast(e.message);
-          skipBtn.disabled = false;
-          armed = false;
-          skipBtn.textContent = "Skip to next character";
-        }
+        } catch (e) { toast(e.message); b.disabled = false; }
       });
-    }
+      return b;
+    };
     render(stage,
       h("div", { class: "row-actions surv-top" },
-        skipBtn,
+        step("Previous", "prev", s.can_prev),
+        h("span", { class: "mono small muted" }, `Character ${(s.stack_index ?? 0) + 1} / ${s.pool_size ?? 1}`),
+        step("Next", "next", s.can_next),
         h("a", { class: "link-btn", href: "#/s-mode" }, "Leave (progress is saved)")),
       card(), pips(), transcript(), options());
   }

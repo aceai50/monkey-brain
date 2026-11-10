@@ -347,7 +347,10 @@ def dark_public(s: dict) -> dict:
         "image_url": s.get("image_url") or f"/static/img/faces/{ch['image_label']}.jpg",
         "points": d["points"], "max_points": DARK_START_POINTS,
         "stalls": d["stalls"], "max_stalls": DARK_MAX_STALLS,
-        "can_skip": int(s.get("pool_size") or 1) > 1, "pool_size": int(s.get("pool_size") or 1),
+        "pool_size": int(s.get("pool_size") or 1), "stack_index": int(s.get("stack_index") or 0),
+        "can_skip": int(s.get("pool_size") or 1) > 1,
+        "can_next": int(s.get("stack_index") or 0) < int(s.get("pool_size") or 1) - 1,
+        "can_prev": int(s.get("stack_index") or 0) > 0,
         "found": {k: bool(d["revealed"].get(k)) for k in DARK_SECRETS},
         "secrets": {k: (ch["secrets"][k] if d["revealed"].get(k) else None) for k in DARK_SECRETS},
         "messages": [m for entry in d["log"] for m in (
@@ -371,7 +374,8 @@ def dark_public(s: dict) -> dict:
     return out
 
 
-async def _create_dark_with(user: dict, bucket: str, ch: dict, pool_size: int, attempt: int = 1) -> dict:
+async def _create_dark_with(user: dict, bucket: str, ch: dict, pool_size: int,
+                            attempt: int = 1, stack_index: int = 0) -> dict:
     db = get_db()
     face = await db.faces.find_one({"_id": ch["image_label"]})
     image_url = (f"/static/img/faces/{face['filename']}" if face
@@ -380,7 +384,7 @@ async def _create_dark_with(user: dict, bucket: str, ch: dict, pool_size: int, a
     doc = {
         "_id": ObjectId(), "user_id": user["_id"], "date": today_ist(), "mode": "dark", "pillar": "surveillance",
         "difficulty": bucket, "state": "active", "character": ch, "image_url": image_url,
-        "pool_size": pool_size,
+        "pool_size": pool_size, "stack_index": stack_index,
         "dark": {"node_id": ch["start"], "points": DARK_START_POINTS, "stalls": 0, "locked": {},
                  "revealed": {}, "turns": 0, "wasted": 0, "outcome": None, "log": [],
                  "attempt": attempt, "seed": seed,
@@ -398,38 +402,33 @@ async def create_dark(user: dict, difficulty: str) -> dict:
                                          "pillar": "surveillance", "state": "active"})
     if active is not None:
         return active
-    date = today_ist()
     bucket = difficulty if difficulty in DARK_BUCKETS else "medium"
-    pool = await content.resolve_surveillance(date)
-    items = pool.get(bucket) or pool.get("medium") or []
-    if not items:
+    stack = await content.dark_stack("surveillance", bucket)
+    if not stack:
         raise HTTPException(503, "No S-mode scenarios are available yet.")
-    seen = set(await db.sessions.distinct(
-        "character.image_label", {"user_id": user["_id"], "mode": "dark", "state": "finished"}))
-    fresh = [c for c in items if c["image_label"] not in seen] or items
-    runs = await db.sessions.count_documents({"user_id": user["_id"], "mode": "dark"})
-    ch = fresh[runs % len(fresh)]
-    return await _create_dark_with(user, bucket, ch, len(items), attempt=runs + 1)
+    return await _create_dark_with(user, bucket, stack[0]["scenario"], len(stack), stack_index=0)
 
 
-async def dark_skip(user: dict, sid: str) -> dict:
-    """Discard this run and start the next loaded character in the same bucket (cyclic)."""
+async def dark_step(user: dict, sid: str, direction: str) -> dict:
+    """Move through the cached 7-day scenario stack and start that character (discard current)."""
     s = await get_dark(user, sid)
     if s["state"] != "active":
         raise HTTPException(409, "This run is already over")
     bucket = s["difficulty"]
-    pool = await content.resolve_surveillance(today_ist())
-    items = pool.get(bucket) or pool.get("medium") or []
-    if len(items) < 2:
-        raise HTTPException(409, "There is no other character to skip to")
-    cur = s["character"]
-    idx = next((i for i, c in enumerate(items)
-                if c.get("id") == cur.get("id")
-                or (c.get("image_label") == cur.get("image_label") and c.get("name") == cur.get("name"))), -1)
-    nxt = items[(idx + 1) % len(items)]
+    stack = await content.dark_stack("surveillance", bucket)
+    total = len(stack)
+    cur = s["character"].get("id")
+    idx = next((i for i, e in enumerate(stack) if e["scenario"].get("id") == cur), 0)
+    ni = idx + (1 if direction == "next" else -1)
+    if ni < 0 or ni >= total:
+        raise HTTPException(409, "No more characters in this set")
     await get_db().sessions.delete_one(
-        {"_id": s["_id"], "user_id": user["_id"], "mode": "dark", "state": "active"})
-    return await _create_dark_with(user, bucket, nxt, len(items))
+        {"_id": s["_id"], "user_id": user["_id"], "mode": "dark", "pillar": "surveillance", "state": "active"})
+    return await _create_dark_with(user, bucket, stack[ni]["scenario"], total, stack_index=ni)
+
+
+async def dark_skip(user: dict, sid: str) -> dict:
+    return await dark_step(user, sid, "next")
 
 
 async def get_dark(user: dict, sid: str) -> dict:
@@ -541,6 +540,9 @@ def act_public(s: dict) -> dict:
         "phase": act["phase"], "difficulty": s["difficulty"], "turns": sc["turns"],
         "max_doubt": act_deceive.MAX_DOUBT, "image_url": s.get("image_url"),
         "pool_size": int(s.get("pool_size") or 1), "can_skip": int(s.get("pool_size") or 1) > 1,
+        "stack_index": int(s.get("stack_index") or 0),
+        "can_next": int(s.get("stack_index") or 0) < int(s.get("pool_size") or 1) - 1,
+        "can_prev": int(s.get("stack_index") or 0) > 0,
         "show_improvised": act["show_improvised"],
         "timer": {"enabled": act["timer"]["enabled"], "preset": act["timer"]["preset"],
                   "seconds": act["timer"]["seconds"]},
@@ -584,11 +586,31 @@ def act_public(s: dict) -> dict:
                    for e in act["ledger"].values()],
         "caught": len(act["caught"]),
     })
+    out["transcript"] = _act_transcript(act["log"])
+    return out
+
+
+def _act_transcript(log: list[dict]) -> list[dict]:
+    """Replay the scene as chat: their line -> your pick -> their reaction."""
+    out: list[dict] = []
+    for e in log:
+        if e.get("check"):
+            if e.get("line"):
+                out.append({"role": "them", "speaker": e.get("speaker", ""), "text": e["line"]})
+            if e.get("text"):
+                out.append({"role": "them", "speaker": e.get("speaker", ""), "text": e["text"]})
+        elif e.get("stammer"):
+            out.append({"role": "system", "text": "You hesitated too long."})
+        elif e.get("chosen") is not None:
+            out.append({"role": "them", "speaker": e.get("speaker", ""), "text": e.get("line", "")})
+            out.append({"role": "me", "text": e["chosen"]})
+            if e.get("reaction"):
+                out.append({"role": "them", "speaker": e.get("speaker", ""), "text": e["reaction"]})
     return out
 
 
 async def _create_act_with(user: dict, bucket: str, sc: dict, pool_size: int, settings: dict,
-                           attempt: int = 1) -> dict:
+                           attempt: int = 1, stack_index: int = 0) -> dict:
     db = get_db()
     cast_media = {c["id"]: await _face_url(c.get("image_label") or sc["image_label"]) for c in sc["cast"]}
     seed = uuid.uuid4().hex
@@ -597,7 +619,8 @@ async def _create_act_with(user: dict, bucket: str, sc: dict, pool_size: int, se
     doc = {
         "_id": ObjectId(), "user_id": user["_id"], "date": today_ist(), "mode": "dark", "pillar": ACT_PILLAR,
         "difficulty": bucket, "state": "active", "scenario": sc,
-        "image_url": await _face_url(sc["image_label"]), "cast_media": cast_media, "pool_size": pool_size,
+        "image_url": await _face_url(sc["image_label"]), "cast_media": cast_media,
+        "pool_size": pool_size, "stack_index": stack_index,
         "act": {"phase": "prep", "studied": [], "doubt": 0, "vague_streak": 0, "vague_count": 0,
                 "turn": 0, "node_id": "n1", "ledger": {}, "caught": [], "wasted": 0, "log": [],
                 "suspicion": {c["id"]: 0 for c in sc["cast"]},
@@ -617,18 +640,32 @@ async def create_act(user: dict, difficulty: str, settings: dict | None = None) 
                                          "pillar": ACT_PILLAR, "state": "active"})
     if active is not None:
         return active
-    date = today_ist()
     bucket = difficulty if difficulty in DARK_BUCKETS else "medium"
-    pool = await content.resolve_act(date)
-    items = pool.get(bucket) or pool.get("medium") or []
-    if not items:
+    stack = await content.dark_stack(ACT_PILLAR, bucket)
+    if not stack:
         raise HTTPException(503, "No Act & Deceive scenarios are available yet.")
-    seen = set(await db.sessions.distinct("scenario.id", {"user_id": user["_id"], "mode": "dark",
-                                                          "pillar": ACT_PILLAR, "state": "finished"}))
-    fresh = [s for s in items if s["id"] not in seen] or items
-    runs = await db.sessions.count_documents({"user_id": user["_id"], "mode": "dark", "pillar": ACT_PILLAR})
-    sc = fresh[runs % len(fresh)]
-    return await _create_act_with(user, bucket, sc, len(items), _act_settings(settings), attempt=runs + 1)
+    return await _create_act_with(user, bucket, stack[0]["scenario"], len(stack),
+                                  _act_settings(settings), stack_index=0)
+
+
+async def act_step(user: dict, sid: str, direction: str) -> dict:
+    """Move through the cached 7-day scenario stack and start that scenario (discard current)."""
+    s = await get_act(user, sid)
+    if s["state"] != "active":
+        raise HTTPException(409, "This run is already over")
+    bucket = s["difficulty"]
+    stack = await content.dark_stack(ACT_PILLAR, bucket)
+    total = len(stack)
+    cur = s["scenario"].get("id")
+    idx = next((i for i, e in enumerate(stack) if e["scenario"].get("id") == cur), 0)
+    ni = idx + (1 if direction == "next" else -1)
+    if ni < 0 or ni >= total:
+        raise HTTPException(409, "No more scenarios in this set")
+    await get_db().sessions.delete_one(
+        {"_id": s["_id"], "user_id": user["_id"], "mode": "dark", "pillar": ACT_PILLAR, "state": "active"})
+    settings = {"enabled": s["act"]["timer"]["enabled"], "preset": s["act"]["timer"]["preset"],
+                "seconds": s["act"]["timer"]["seconds"], "show_improvised": s["act"]["show_improvised"]}
+    return await _create_act_with(user, bucket, stack[ni]["scenario"], total, settings, stack_index=ni)
 
 
 async def get_act(user: dict, sid: str) -> dict:
@@ -638,8 +675,8 @@ async def get_act(user: dict, sid: str) -> dict:
     if s is None:
         raise HTTPException(404, "Session not found")
     if s["state"] == "active":
-        pool = await content.resolve_act(today_ist())
-        n = len(pool.get(s["difficulty"]) or [])
+        stack = await content.dark_stack(ACT_PILLAR, s["difficulty"])
+        n = len(stack)
         if n and n != s.get("pool_size"):
             s["pool_size"] = n
             await get_db().sessions.update_one({"_id": s["_id"]}, {"$set": {"pool_size": n}})
@@ -710,15 +747,18 @@ async def act_choose(user: dict, sid: str, key: str) -> dict:
         raise HTTPException(400, "Bad option")
     option = node["options"][oi]
     cast = {c["id"]: c for c in sc["cast"]}
-    better = None
-    for cand in node["options"]:
-        if cand["kind"] != "evade" and act_deceive.eval_cond(
-                cand["works_if"], {"studied": set(act["studied"]), "vague_streak": act["vague_streak"],
-                                   "speaker": node.get("speaker"),
-                                   "personality": (cast.get(node.get("speaker")) or {}).get("personality"),
-                                   "ledger": act["ledger"], "turn": act["turn"], "doubt": act["doubt"]}):
-            better = cand["text"]
-            break
+    ctx = {"studied": set(act["studied"]), "vague_streak": act["vague_streak"],
+           "speaker": node.get("speaker"),
+           "personality": (cast.get(node.get("speaker")) or {}).get("personality"),
+           "ledger": act["ledger"], "turn": act["turn"], "doubt": act["doubt"]}
+    options_view, ideal_i, best = [], None, None
+    for i, cand in enumerate(node["options"]):
+        works = act_deceive.eval_cond(cand["works_if"], ctx)
+        options_view.append({"tag": cand["tag"], "text": cand["text"],
+                             "rationale": cand["rationale"], "works": works})
+        if works and (best is None or cand["doubt_on_success"] < best):
+            best, ideal_i = cand["doubt_on_success"], i
+    better = node["options"][ideal_i]["text"] if ideal_i is not None else None
     reaction = act_deceive.apply_option(act, sc, node, option)
     if not reaction["ok"]:
         act["wasted"] += 1
@@ -730,6 +770,7 @@ async def act_choose(user: dict, sid: str, key: str) -> dict:
         "speaker": cast.get(node.get("speaker"), {}).get("name", ""), "line": node["line"],
         "chosen": option["text"], "tag": option["tag"], "ok": reaction["ok"],
         "delta": reaction["delta"], "doubt_after": act["doubt"], "better": better,
+        "rationale": option["rationale"], "ideal": ideal_i, "options": options_view,
         "reaction": reaction["line"],
     })
     nxt = node["next"]
@@ -791,22 +832,7 @@ async def act_timeout(user: dict, sid: str) -> dict:
 
 
 async def act_skip(user: dict, sid: str) -> dict:
-    s = await get_act(user, sid)
-    if s["state"] != "active":
-        raise HTTPException(409, "This run is already over")
-    bucket = s["difficulty"]
-    pool = await content.resolve_act(today_ist())
-    items = pool.get(bucket) or pool.get("medium") or []
-    if len(items) < 2:
-        raise HTTPException(409, "There is no other scenario to skip to")
-    cur_id = s["scenario"]["id"]
-    idx = next((i for i, sc in enumerate(items) if sc["id"] == cur_id), -1)
-    nxt = items[(idx + 1) % len(items)]
-    settings = {"enabled": s["act"]["timer"]["enabled"], "preset": s["act"]["timer"]["preset"],
-                "seconds": s["act"]["timer"]["seconds"], "show_improvised": s["act"]["show_improvised"]}
-    await get_db().sessions.delete_one(
-        {"_id": s["_id"], "user_id": user["_id"], "mode": "dark", "pillar": ACT_PILLAR, "state": "active"})
-    return await _create_act_with(user, bucket, nxt, len(items), settings)
+    return await act_step(user, sid, "next")
 
 
 async def act_restart(user: dict, sid: str) -> dict:

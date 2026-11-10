@@ -42,6 +42,18 @@ async def skip(sid: str, user: dict = Depends(get_profiled_user)):
     return svc.act_public(await svc.act_skip(user, sid))
 
 
+@router.post("/{sid}/next", status_code=201)
+async def next_scenario(sid: str, user: dict = Depends(get_profiled_user)):
+    rate_limit("dark-skip", str(user["_id"]), 200, 3600)
+    return svc.act_public(await svc.act_step(user, sid, "next"))
+
+
+@router.post("/{sid}/prev", status_code=201)
+async def prev_scenario(sid: str, user: dict = Depends(get_profiled_user)):
+    rate_limit("dark-skip", str(user["_id"]), 200, 3600)
+    return svc.act_public(await svc.act_step(user, sid, "prev"))
+
+
 @router.post("/{sid}/restart", status_code=201)
 async def restart(sid: str, user: dict = Depends(get_profiled_user)):
     rate_limit("dark-start", str(user["_id"]), 40, 3600)
