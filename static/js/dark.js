@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { logout, state } from "./auth.js";
+import { howToPlay } from "./guide.js";
 import { h, notice, render, toast, topbar } from "./dom.js";
 
 const SECRET_LABEL = { strength: "Strength", weakness: "Weakness", goal: "Goal" };
@@ -96,6 +97,7 @@ export function darkView(root, ctx) {
         h("span", { class: "mono small muted" }, `Character ${(s.stack_index ?? 0) + 1} / ${s.pool_size ?? 1}`),
         step("Next", "next", s.can_next),
         h("a", { class: "link-btn", href: "#/s-mode" }, "Leave (progress is saved)")),
+      howToPlay("surveillance"),
       card(), pips(), transcript(), options());
   }
 

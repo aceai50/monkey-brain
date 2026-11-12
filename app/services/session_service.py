@@ -33,7 +33,7 @@ BREAK_SECONDS = 30
 GRACE_S = 8
 STALE_PRACTICE = timedelta(hours=2)
 TERMINAL = ("submitted", "expired")
-HIDDEN = {"answer", "explanation", "tag", "readings", "ambiguity_note"}
+HIDDEN = {"answer", "explanation", "tag", "readings", "ambiguity_note", "concept"}
 DEFAULT_D = {p: 0.2 for p in PILLARS}
 
 

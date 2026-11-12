@@ -334,7 +334,7 @@ async def _gemini_art_pools(date: str, prev_meta: dict) -> tuple[dict, dict, dic
             used = _usage_label()
             seen: set[str] = set()
             for r in raws:
-                q = art_params.validate_art_item(r, b, len(kept))
+                q = art_params.validate_art_item(r, b, len(kept), name)
                 if q is None:
                     continue
                 ws = _item_words(q)

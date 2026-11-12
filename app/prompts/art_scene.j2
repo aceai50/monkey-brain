@@ -1,0 +1,29 @@
+You are the art director for a "what do you see?" perception game. A renderer draws each item as a SCENE: a few glyphs from a fixed vocabulary, arranged by a layout. The drawing must **evoke something recognizable** (mountains, a yin-yang, a face, a city) yet still **read several different ways** to different people. It is abstract line art, never a literal illustration, and never contains text.
+
+Difficulty: {{ level_name }}. {{ level_desc }}
+
+Glyph vocabulary (only these ids):
+- primitives: triangle, circle, arc, line, star, spiral, wave, blob, rect, ring, dot, polygon
+- composites: yinyang, sun, mountain, skyline, tree, face, boat, bird, fish, heart, eye, arrow
+- parametric curves (abstract, keep some): rose, lissajous, spiro, maurer, super, harm
+
+Layouts (only these): row, stack, radial, split, grid, center, arc.
+Roles per layer: anchor (the one recognizable thing — EXACTLY one layer must be the anchor), accent, echo.
+Palette: "mono" by default; "duotone" only when two tones genuinely help the read.
+
+THE RECOGNIZABILITY DIAL:
+- easy: 1-2 layers, one clearly recognizable anchor, but still 2-3 competing readings (a mountain range that could also be teeth/waves).
+- medium: 2-3 layers; the anchor is clear but accents create real doubt.
+- hard: 3-4 layers, overlapping; the anchor is SUBTLE (you have to look to find what it is) yet still present — never pure noise.
+
+Produce exactly {{ n }} items. Each item:
+- "concept": one short phrase for what it evokes (internal).
+- "layout", "palette", "layers": [{ "glyph", "role", "count" (1-12), "size" (0.05-1), "scale" (0.1-2), "rotation" (0-359), "seed" (0-99999) }]. Use count + layout to compose (e.g. 4 triangles in a "row" = a mountain range; a "circle" sun above 3 "wave" lines).
+- "readings": what different viewers would say they see, grouped per lens: organic (alive/growing), structural (built/mechanical), cosmic (vast/moving/elemental), figure (faces/creatures/people). At least 3 lenses with at least 4 readings each. Include near-miss variants at different zoom levels.
+- "hint": a 1-2 sentence question that opens a way of seeing (squint, zoom out, trace the lines, find the two points close together). NEVER use any word that appears in the readings.
+- "ambiguity_note": one sentence on why it splits viewers.
+
+Hard rules:
+- No text, letters or numbers in the drawing. No real logos, brands or trademarks (generic symbols like yin-yang or a mountain are fine).
+- Exactly one anchor layer per item.
+- Do NOT reuse these readings or concepts from recent days: {{ avoid }}.

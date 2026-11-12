@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { logout, state } from "./auth.js";
+import { howToPlay } from "./guide.js";
 import { h, notice, render, toast, topbar } from "./dom.js";
 
 const OUTCOME = { convinced: "Mission successful.", partial: "Half the room bought it.", busted: "Busted." };
@@ -82,6 +83,7 @@ export function actView(root, ctx) {
       h("p", { class: "muted small" }, MOVE_INTENT),
       h("h2", {}, `Cram — study ${s.pick} of ${s.topics.length}`),
       h("div", { class: "act-topics" }, ...cards),
+      howToPlay("act_deceive"),
       h("div", { class: "row-actions" }, startBtn));
     refresh();
   }

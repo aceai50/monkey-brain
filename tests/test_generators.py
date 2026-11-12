@@ -56,12 +56,39 @@ def test_cycle_answer_is_the_cycle_not_a_guess():
         assert q["options"][q["answer"]] == shown[0]
 
 
-def test_art_params_whitelisted():
+def test_art_params_scenes_are_whitelisted():
     for b in range(4):
-        for q in art_params.generate(b, 8, "t"):
-            assert art_params.validate_params(q["params"])
+        items = art_params.generate(b, 8, "t")
+        assert items
+        for q in items:
+            assert q["type"] == "scene"
+            assert q["layout"] in art_params.LAYOUTS and q["palette"] in art_params.PALETTES
+            assert 1 <= len(q["layers"]) <= 4
+            assert sum(1 for l in q["layers"] if l["role"] == "anchor") == 1
+            for l in q["layers"]:
+                assert l["glyph"] in art_params.GLYPHS
+                assert 1 <= l["count"] <= 12 and 0.05 <= l["size"] <= 1.0
+    assert any(q["readings"] for q in art_params.generate(0, 8, "t"))   # curated recognizable scenes
     assert art_params.clean_word("<script>") is None
     assert art_params.classify_word("a Galaxy") == "cosmic"
+
+
+def test_validate_scene_rejects_bad_items():
+    base = {"concept": "mountains", "layout": "row", "palette": "mono",
+            "hint": "Squint and look again.", "prompt": "What do you see?",
+            "readings": {"structural": ["peaks", "ridge", "wall", "spire"],
+                         "cosmic": ["dunes", "waves", "horizon", "drift"],
+                         "figure": ["teeth", "crowns", "jaws", "spikes"]},
+            "layers": [{"glyph": "triangle", "role": "anchor", "count": 4, "size": 0.5, "scale": 1, "rotation": 0, "seed": 1}]}
+    assert art_params.validate_scene_item(base, 0, "easy", 0) is not None
+    two_anchor = {**base, "layers": base["layers"] + [{"glyph": "circle", "role": "anchor", "count": 1, "size": 0.3}]}
+    assert art_params.validate_scene_item(two_anchor, 0, "easy", 0) is None
+    bad_glyph = {**base, "layers": [{**base["layers"][0], "glyph": "smiley"}]}
+    assert art_params.validate_scene_item(bad_glyph, 0, "easy", 0) is None
+    naming_hint = {**base, "hint": "Do you see the peaks and dunes?"}   # names readings
+    assert art_params.validate_scene_item(naming_hint, 0, "easy", 0) is None
+    thin = {**base, "readings": {"structural": ["a", "b", "c", "d"]}}   # <3 lenses
+    assert art_params.validate_scene_item(thin, 0, "easy", 0) is None
 
 
 def test_kinesthetic_schedule():

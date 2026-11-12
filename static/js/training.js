@@ -1,6 +1,7 @@
 // Training runner. The SERVER owns time: each set has a server deadline; this file only displays it
 // and submits when it hits zero (or when the player finishes early).
 import { api } from "./api.js";
+import { howToPlay } from "./guide.js";
 import { h, fmtClock, notice, render, sleep, tally } from "./dom.js";
 import * as arithmetic from "./games/arithmetic.js";
 import * as art from "./games/art.js";
@@ -68,6 +69,7 @@ function intro(stage, pillar, doneCount, level, total, circuit) {
       h("h1", {}, name), h("p", { class: "lede" }, how),
       h("p", { class: "mono muted" }, `${level} level. Four minutes. The clock starts after a short countdown.`),
       circuit ? tally(doneCount, true) : null,
+      howToPlay(pillar),
       h("button", { class: "btn btn--primary", type: "button", onclick: resolve }, "Begin"));
     stage.querySelector("button").focus();
   });

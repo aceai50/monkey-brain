@@ -5,6 +5,7 @@ import { dashboardView, settingsView } from "./dashboard.js";
 import { toast } from "./dom.js";
 import { adminView } from "./admin.js";
 import { actView } from "./act.js";
+import { codexView } from "./codex.js";
 import { darkView } from "./dark.js";
 import { historyView } from "./history.js";
 import { sModeView } from "./s-mode.js";
@@ -15,7 +16,7 @@ const root = document.getElementById("app");
 const views = {
   login: authView, "set-password": setPasswordView, profile: profileView, dashboard: dashboardView,
   settings: settingsView, leaderboard: leaderboardView, history: historyView, customize: customizeView,
-  train: trainView, admin: adminView, "s-mode": sModeView, dark: darkView, act: actView,
+  train: trainView, admin: adminView, "s-mode": sModeView, dark: darkView, act: actView, codex: codexView,
 };
 const PUBLIC = new Set(["login", "set-password"]);
 let cleanup = null;

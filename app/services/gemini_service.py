@@ -83,24 +83,30 @@ class _ArtReadings(BaseModel):
     cosmic: list[str]
     figure: list[str]
 
-class _ArtItem(BaseModel):
-    kind: str
-    a: float
-    b: float
-    c: float = 0
-    d: float = 0
-    e: float = 0
-    phase: float = 0
-    layers: int = 1
-    rotate: int = 0
+
+class _SceneLayer(BaseModel):
+    glyph: str
+    role: str = "anchor"
+    count: int = 1
+    size: float = 0.6
+    scale: float = 1.0
+    rotation: int = 0
+    seed: int = 0
+
+
+class _ArtSceneItem(BaseModel):
+    concept: str
+    layout: str
+    palette: str = "mono"
+    layers: list[_SceneLayer]
     prompt: str = "What is the first thing you see?"
     hint: str
     readings: _ArtReadings
-    ambiguity_note: str
+    ambiguity_note: str = ""
 
 
-class _ArtBatch(BaseModel):
-    items: list[_ArtItem]
+class _ArtSceneBatch(BaseModel):
+    items: list[_ArtSceneItem]
 
 
 class _SurvSecrets(BaseModel):
@@ -410,9 +416,9 @@ async def generate_items(level_name: str, level_desc: str, n: int, avoid: list[s
 
 
 async def generate_art_items(level_name: str, level_desc: str, n: int, avoid: list[str]) -> list[dict]:
-    prompt = _env.get_template("art_curves.j2").render(
+    prompt = _env.get_template("art_scene.j2").render(
         level_name=level_name, level_desc=level_desc, n=n, avoid=", ".join(avoid) or "none")
-    data = await _call(settings.gemini_model, prompt, _ArtBatch, 1.0)
+    data = await _call(settings.gemini_model, prompt, _ArtSceneBatch, 1.0)
     return data.get("items", [])
 
 

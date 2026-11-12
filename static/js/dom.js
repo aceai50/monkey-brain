@@ -61,6 +61,7 @@ export function topbar(active, onLogout, user) {
     link("#/leaderboard", "Leaderboard", "leaderboard"),
     link("#/history", "History", "history"),
     link("#/customize", "Customize", "customize"),
+    link("#/codex", "Codex", "codex"),
     link("#/settings", "Settings", "settings"),
     user?.is_admin ? link("#/admin", "Admin", "admin") : null,
     h("button", { type: "button", onclick: onLogout }, "Log out")
