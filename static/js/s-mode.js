@@ -35,7 +35,8 @@ export function sModeView(root, ctx) {
   let difficulty = "medium";
   let timerOn = false;
   let timerPreset = "normal";
-  let showImprovised = true;
+  let customSeconds = 20;
+  let showDebts = true;
   const msg = h("div", {});
   const runs = h("div", { class: "hist-body" });
   const settingsBox = h("div", {});
@@ -46,7 +47,8 @@ export function sModeView(root, ctx) {
     msg.replaceChildren();
     try {
       const res = await api("/api/dark/practice", { method: "POST",
-        body: { pillar, difficulty, settings: { timer: { enabled: timerOn, preset: timerPreset }, show_improvised: showImprovised } } });
+        body: { pillar, difficulty, settings: { timer: { enabled: timerOn, preset: timerPreset,
+          seconds: timerPreset === "custom" ? customSeconds : undefined }, show_debts: showDebts } } });
       ctx.navigate(res.runner);
     } catch (e) { render(msg, notice("error", e.message)); startBtn.disabled = false; }
   } }, "Start");
@@ -78,14 +80,21 @@ export function sModeView(root, ctx) {
     const presetBox = h("div", {});
     const drawPresets = () => {
       if (!timerOn) { presetBox.replaceChildren(); return; }
-      render(presetBox, segmented("Timer", [["relaxed", "Relaxed"], ["normal", "Normal"], ["tight", "Tight"]],
-        timerPreset, (v) => { timerPreset = v; }));
+      const kids = [segmented("Timer", [["relaxed", "Relaxed"], ["normal", "Normal"],
+        ["tight", "Tight"], ["custom", "Custom"]], timerPreset, (v) => { timerPreset = v; drawPresets(); })];
+      if (timerPreset === "custom") {
+        const inp = h("input", { class: "input", type: "number", min: "10", max: "90", step: "5",
+          value: String(customSeconds),
+          oninput: (e) => { customSeconds = Math.min(90, Math.max(10, parseInt(e.target.value || "20", 10) || 20)); } });
+        kids.push(h("div", { class: "field" }, h("label", { class: "label" }, "Seconds per answer"), inp));
+      }
+      render(presetBox, ...kids);
     };
     render(settingsBox,
       h("h3", { class: "mono small" }, "Actor settings"),
       toggleRow("Timed scene", timerOn, (v) => { timerOn = v; drawPresets(); }),
       presetBox,
-      toggleRow("Show which claims were improvised", showImprovised, (v) => { showImprovised = v; }));
+      toggleRow("Reveal which claims were called in", showDebts, (v) => { showDebts = v; }));
     drawPresets();
   }
 

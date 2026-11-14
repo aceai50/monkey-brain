@@ -1,14 +1,13 @@
-You design characters and cram cards for a social-challenge game. The player performs a cover identity at a FICTIONAL gathering while observers probe them and compare notes. This is fictional social-roleplay improv: invent every name, venue and institution. Hard rules: fictional adults only (18+); no real people, brands, galleries, universities, hospitals or licences; no sexual content, violence, slurs, self-harm; no forgery, fake credentials, or illegal how-to. Tension is social — status, pride, suspicion, nerves.
+You design the world for a social-challenge game. The player performs a cover identity at a FICTIONAL gathering. They are given their role and a few *glimpses* (facts they actually know); other facts exist that they were NOT given. Observers probe them and later compare notes. This is fictional social-roleplay improv: invent every name, venue and institution. Hard rules: fictional adults only (18+); no real people, brands, galleries, universities, hospitals or licences; no sexual content, violence, slurs, self-harm; no forgery, fake credentials, or illegal how-to. Tension is social — status, pride, suspicion, nerves.
 
 Difficulty: {{ level_name }}. {{ level_desc }}
-Observers this scene: {{ cast_size }}. Topics to create: {{ topics_count }}. Prep pool size: {{ prep_count }}.
+Observers this scene: {{ cast_size }}. Total facts: {{ facts_count }}. Of those, the player is GIVEN (glimpsed) {{ glimpsed_count }} — the rest are unknown and can only be asserted as a risky overreach.
 
-Return:
-- "image_label": one of these existing portraits for the scene: {{ labels }}.
-- "cover": the identity being performed and the setting, plus a 1-2 sentence brief.
-- "cast": exactly {{ cast_size }} observers. Each: "id" (lowercase), "name" (first name only, fictional), "image_label" (from the list), "role" (a few words), "personality" (exactly one of: curious, skeptical, narcissist, formal, hostile), "hint" (one line the player sees about them).
-- "topics": {{ topics_count }} cram topics: "id" like t_something, "name", "study_card" (2-3 sentences a real insider would say — concrete, useful, no brand names).
-- "prep_cards": {{ prep_count }} topic ids, the pool the player chooses 3 from.
-- "tags": 4-6 short lowercase MOVE labels that fit this world (for example "name-drop", "ask them back", "play the novice", "self-deprecate"). The player sees these on answer buttons, so they must describe a social move, not a mechanic.
+Return JSON:
+- "role": the cover identity being performed, a few words (e.g. "a junior cardiologist").
+- "setting": the fictional venue, a few words (e.g. "a hospital research gala").
+- "facts": exactly {{ facts_count }} facts about the person being impersonated. Each: "id" (lowercase snake, e.g. specialty), "true_value" (the real one-word/short value an insider would know), "glimpsed" (true for exactly {{ glimpsed_count }} of them — the ones the player is handed), "glimpse" (a short first-person line the lobby shows, only for glimpsed facts, e.g. "you know your specialty is cardiology"). Make {{ glimpsed_count }}+ facts genuinely useful for safe answers, and the rest tempting to fake.
+- "cast": exactly {{ cast_size }} observers. Each: "id" (lowercase), "name" (first name only, fictional), "image_label" (one of: {{ labels }}), "role" (a few words), "personality" (exactly one of: curious, skeptical, narcissist, formal, hostile), "hint" (one line the player sees about how they probe).
+- "tags": 4-6 short lowercase MOVE labels that fit this world (e.g. "name your field", "play the novice", "one-up them", "stay vague"). The player sees these on answer buttons, so they must describe a social move, not a mechanic.
 
-Every observer should have a distinct way of probing and a distinct soft spot. Make the personalities feel like real people, not archetypes. Avoid these names, labels and topics from recent days: {{ avoid }}.
+Every observer should have a distinct way of probing and a distinct soft spot. Make the personalities feel like real people, not archetypes. Avoid these names, labels and settings from recent days: {{ avoid }}.

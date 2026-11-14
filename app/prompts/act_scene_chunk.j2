@@ -1,29 +1,32 @@
-Continue the scene script for a social-challenge game. It must read like a NATURAL conversation: each observer speaks in their own voice, reacts to what was just said, and probes in their own way. Never sound like a quiz; never mention mechanics.
+Continue the scene script for a social-challenge game. It must read like a NATURAL conversation: each observer speaks in their own voice, reacts to what was just said, and probes in their own way. Never sound like a quiz; never mention mechanics. The player holds a cover identity and only knows the G LIMPsed facts; the rest they can only fake.
+
+The player is: {{ role }} at {{ setting }}.
 
 Cast (id | name | personality | role):
 {{ cast }}
 
-Topics (id | name): {{ topics }}
+Facts (id | true value | glimpsed/unknown):
+{{ facts }}
+
 Move tags the player will SEE (use 4 DIFFERENT tags per turn): {{ tags }}
-Already used topics (avoid repeating): {{ used }}
+Facts already used as a claim earlier (prefer fresh ones): {{ used }}
 
 Previous lines in the conversation (continue naturally from these):
 {{ prior }}
 
 Write exactly {{ count }} consecutive scene nodes. Return JSON: {"nodes": [ ... ]}.
 
-Each node: "id" (any string), "speaker" (a cast id), "line" (the spoken line), and "options": exactly 4.
-Every node has exactly one option of each hidden kind:
-- "commit": a specific claim about a topic; set "topic" to a topic id. Works if the player studied it; otherwise it becomes an improvised claim that a later check will catch.
-- "evade": a vague non-answer. Works early; fails after two evasions in a row.
-- "risk": a bold claim; "doubt_on_success" must be -1 and it is the ONLY move that lowers doubt. It always counts as an improvised claim. Gate it with a condition.
-- "redirect": turn the question back or to someone else. Gate it with a condition.
-Each option: "text" (player voice, max 160 chars), "tag" (from the tag list), "kind", "topic" (commit only, else null), "commits" (claim ids for commit/risk), "works_if" (1-2 atoms, ALL must hold), "doubt_on_success" (0 or -1 for risk), "doubt_on_fail" (1, or 2 for a failed risk), "line_if_pass", "line_if_fail", "rationale" (one sentence, review only).
+Each node: "id" (any string), "speaker" (a cast id), "line" (the spoken line), and "options": exactly 4 — one of EACH hidden kind:
+- "safe": assert a G LIMPsed fact at its exact true value. Set "fact" to a glimpsed fact id and "value" to its true value verbatim. Works if the player knows it. works_if: [{"glimpsed": fact}]. doubt_on_success 0, doubt_on_fail 1.
+- "deflect": a vague non-answer or turn it back. NO fact, NO value. works_if: [{"vague_streak_lt": 2}] or [{"target_personality": "..."}] or [{"target": cast_id}]. doubt_on_fail 1.
+- "overreach": confidently assert a detail from an UNKNOWN (non-glimpsed) fact. Set "fact" to a non-glimpsed fact id and "value" to a plausible claim. This buys credibility now but a LATER observer calls it in. doubt_on_success -1 (the only move that can lower doubt), doubt_on_fail 2. works_if: [] or [{"turn_lt": n}].
+- "reinforce": restate or stand by something already claimed. Set "fact" to a fact id and "value" to the SAME value you gave before. works_if: [{"claimed": fact}]. doubt_on_fail 1.
+Each option also: "tag" (from the tag list), "text" (player voice, max 160 chars), "line_if_pass", "line_if_fail", "rationale" (one sentence, review only).
 
-Condition atoms (use ONLY these): {"studied": topic_id} {"not_studied": topic_id} {"vague_streak_lt": n} {"target": cast_id} {"target_personality": "curious|skeptical|narcissist|formal|hostile"} {"claim_present": claim_id} {"claim_absent": claim_id} {"turn_lt": n} {"doubt_lt": n}
+"works_if" is ALWAYS a JSON LIST of 0-2 condition atoms (use [] when ungated), never a single object. Atoms (use ONLY these): {"glimpsed": fact_id} {"claimed": fact_id} {"not_claimed": fact_id} {"target": cast_id} {"target_personality": "curious|skeptical|narcissist|formal|hostile"} {"turn_lt": n} {"doubt_lt": n} {"vague_streak_lt": n}
 
 Rules:
 - Do NOT include "next" — the engine chains the nodes.
-- The working kind must VARY across the conversation: no kind should be the winning one every turn; risk/redirect need conditions that are sometimes false.
-- Claim ids look like c_short_snake_case; they will be checked later.
+- The working kind must VARY across the conversation: no kind should be the winning one every turn; deflect/reinforce need conditions that are sometimes false.
+- A "safe" fact MUST be glimpsed; an "overreach" fact MUST NOT be glimpsed. Getting this wrong fails validation.
 - Adult, fictional social setting. Same content bans as before.

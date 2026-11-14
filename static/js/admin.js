@@ -4,7 +4,11 @@ import { h, notice, render, toast, topbar } from "./dom.js";
 
 const JOB_PILLAR = { critical: "Critical thinking", art: "Art", surveillance: "Surveillance",
   act_deceive: "Act & Deceive" };
-const JOB_ETA = { critical: 300, art: 300, surveillance: 240, act_deceive: 600 };
+const JOB_ETA = { critical: 300, art: 300, surveillance: 240, act_deceive: 1500 };
+const ACT_BUCKETS = { easy: 300, medium: 450, hard: 600 };
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const jobLabel = (p) => (p && p.startsWith("act_deceive:"))
+  ? `Act & Deceive · ${cap(p.split(":")[1])}` : (JOB_PILLAR[p] || p);
 const fmtDur = (s) => {
   s = Math.max(0, Math.round(s));
   const m = Math.floor(s / 60), r = s % 60;
@@ -19,6 +23,7 @@ export function adminView(root, ctx) {
   const pipeline = h("div", { class: "panel" });
   const jobsBox = h("div", { class: "panel" });
   const logsBox = h("div", { class: "panel" });
+  const metricsBox = h("div", { class: "panel" });
   let logsState = [];
   let logsPage = 1;
   let logsArchive = false;
@@ -51,14 +56,17 @@ export function adminView(root, ctx) {
       const det = h("details", { class: "job" },
         h("summary", {},
           h("span", { class: `job-dot job-dot--${j.status}` }),
-          h("span", { class: "mono small" }, JOB_PILLAR[j.pillar] || j.pillar),
+          h("span", { class: "mono small" }, jobLabel(j.pillar)),
           h("span", { class: "muted small job-secs", "data-id": j.id }, label)),
         h("p", { class: "mono small" }, j.status === "error" ? (j.error || "unknown error")
           : j.status === "completed" ? (j.message || "done")
           : `Running… estimated ${fmtDur(eta)}, about ${fmtDur(Math.max(0, eta - elapsed))} left`),
         h("p", { class: "muted small mono" },
           `started ${new Date(j.started_at).toLocaleTimeString()}` +
-          (j.finished_at ? ` · finished ${new Date(j.finished_at).toLocaleTimeString()} · ${j.elapsed.toFixed(1)}s` : "")));
+          (j.finished_at ? ` · finished ${new Date(j.finished_at).toLocaleTimeString()} · ${j.elapsed.toFixed(1)}s` : "")),
+        j.evals && j.evals.calls != null ? h("p", { class: "muted small mono" },
+          `trace ${j.trace_id || j.evals.trace_id || "?"} · ${j.evals.calls} call(s), ${j.evals.fail_calls} fail, ${j.evals.retries} retry` +
+          (j.evals.used_fallback ? " · fell back to Groq" : "")) : null);
       det.open = openJobs.has(j.id);
       det.addEventListener("toggle", () => {
         if (det.open) openJobs.add(j.id); else openJobs.delete(j.id);
@@ -108,7 +116,7 @@ export function adminView(root, ctx) {
   function renderLogs() {
     const rows = logsState.map((e) => h("tr", {},
       h("td", { class: "mono small" }, `${e.date} · ${new Date(e.started_at).toLocaleTimeString()}`),
-      h("td", {}, e.pillar_label || e.pillar),
+      h("td", {}, e.bucket ? `${e.pillar_label || e.pillar} · ${cap(e.bucket)}` : (e.pillar_label || e.pillar)),
       h("td", { class: "mono small" }, e.trigger === "cron" ? "auto (cron)" : e.trigger),
       h("td", { class: "mono small" }, e.provider || "-"),
       h("td", { class: "mono" }, e.items == null ? "—" : String(e.items)),
@@ -150,15 +158,50 @@ export function adminView(root, ctx) {
     } catch { /* best effort */ }
   }
 
+  function renderMetrics(m) {
+    const metric = (v, l) => h("div", { class: "metric" },
+      h("div", { class: "metric__value" }, String(v)), h("div", { class: "metric__label" }, l));
+    if (!m || !m.total) {
+      render(metricsBox, h("h3", {}, "Generation metrics"),
+        h("p", { class: "muted small" }, "No generation runs in this window yet."));
+      return;
+    }
+    const pc = m.provider_calls || {};
+    const per = Object.entries(m.per_pillar || {});
+    const prov = Object.entries(m.by_provider || {});
+    const errs = Object.entries(m.error_kinds || {});
+    render(metricsBox,
+      h("h3", {}, `Generation metrics · last ${m.window_days} days`),
+      h("div", { class: "surv-report" },
+        metric(m.total, "runs"), metric(`${Math.round((m.success_rate || 0) * 100)}%`, "success"),
+        metric(fmtDur(m.avg_duration_s || 0), "avg time"), metric(pc.failed ?? 0, "failed calls"),
+        metric(pc.retries ?? 0, "retries"), metric(m.fallback_runs ?? 0, "groq fallbacks")),
+      prov.length ? h("p", { class: "muted small mono" }, "Providers (runs): " + prov.map(([k, v]) => `${k}:${v}`).join(" · ")) : null,
+      pc.total ? h("p", { class: "muted small mono" }, `Call error rate: ${Math.round((pc.error_rate || 0) * 100)}% of ${pc.total} calls`) : null,
+      errs.length ? h("p", { class: "muted small mono" }, "Call errors: " + errs.map(([k, v]) => `${k}:${v}`).join(" · ")) : null,
+      m.tokens && (m.tokens.in || m.tokens.out) ? h("p", { class: "muted small mono" }, `Tokens: ${m.tokens.in} in / ${m.tokens.out} out`) : null,
+      per.length ? h("div", { class: "table-wrap" }, h("table", { class: "report" },
+        h("thead", {}, h("tr", {}, ...["Pillar", "Runs", "OK", "Err", "Items", "Avg"].map((c) => h("th", {}, c)))),
+        h("tbody", {}, ...per.map(([k, v]) => h("tr", {},
+          h("th", { scope: "row" }, k), h("td", { class: "mono" }, String(v.runs)),
+          h("td", { class: "mono" }, String(v.completed)), h("td", { class: "mono" }, String(v.errors)),
+          h("td", { class: "mono" }, String(v.items)), h("td", { class: "mono small" }, fmtDur(v.avg_s))))))) : null);
+  }
+
+  async function loadMetrics() {
+    try { renderMetrics(await api("/api/admin/metrics?days=7")); } catch { /* best effort */ }
+  }
+
   async function runGenerate(body) {
     try {
       const r = await api("/api/admin/generate", { method: "POST", body });
-      const parts = (r.jobs || []).map((j) => `${JOB_PILLAR[j.pillar] || j.pillar} ~${fmtDur(j.eta)}`);
+      const parts = (r.jobs || []).map((j) => `${jobLabel(j.pillar)} ~${fmtDur(j.eta)}`);
       toast(`Queued — ${parts.join(" · ") || r.queued.join(", ")}`);
       jobsPage = 1;
       logsPage = 1;
       await loadJobs(1);
       await loadLogs(1);
+      loadMetrics();
     } catch (e) { render(genMsg, notice("error", e.message)); }
   }
   const genBtn = (pillar, label, eta) => {
@@ -167,6 +210,10 @@ export function adminView(root, ctx) {
       title: `Estimated ${fmtDur(secs)} (runs in the background, paced)`,
       onclick: () => runGenerate({ pillar, force: true }) }, `${label} · ~${fmtDur(secs)}`);
   };
+  const actBucketBtn = (b) => h("button", { class: "btn btn--quiet", type: "button",
+    title: `Regenerate only the ${b} Act & Deceive pool (~${fmtDur(ACT_BUCKETS[b])})`,
+    onclick: () => runGenerate({ pillar: "act_deceive", bucket: b, force: true }) },
+    `Act ${cap(b)} · ~${fmtDur(ACT_BUCKETS[b])}`);
   const facesBody = h("div", {});
   const faceLabel = h("input", { class: "input", id: "flabel", placeholder: "student_3", maxlength: "32", autocomplete: "off" });
   const faceFile = h("select", { class: "input", id: "ffile" });
@@ -186,18 +233,20 @@ export function adminView(root, ctx) {
       pipeline,
       h("div", { class: "panel" },
         h("h3", {}, "Generate content"),
-        h("p", { class: "muted small" }, "Regenerates today's pools with Gemini, falling back to Groq. Requests are paced (one at a time) to respect free-tier limits, so runs take a few minutes. Surveillance creates one character per level by default; use +3 to add more to the pool."),
+        h("p", { class: "muted small" }, "Regenerates today's pools with Gemini, falling back to Groq. Requests are paced (one at a time), so runs take a few minutes. Act & Deceive runs as a queue (easy → medium → hard) and stores each difficulty as soon as it finishes, so a slow level never discards the others — or generate just one level."),
         genMsg,
         h("div", { class: "row-actions" },
           genBtn("all", "All pillars", 1440), genBtn("critical", "Critical thinking"),
           genBtn("art", "Art"), genBtn("surveillance", "Surveillance"),
-          genBtn("act_deceive", "Act & Deceive"),
+          genBtn("act_deceive", "Act & Deceive (queue)"),
+          actBucketBtn("easy"), actBucketBtn("medium"), actBucketBtn("hard"),
           h("button", { class: "btn", type: "button",
             title: `Estimated ${fmtDur(JOB_ETA.surveillance * 3)}`,
             onclick: () => runGenerate({ pillar: "surveillance", count: 3, append: true, force: false }) },
             `Surveillance +3 · ~${fmtDur(JOB_ETA.surveillance * 3)}`))),
       jobsBox,
       logsBox,
+      metricsBox,
       h("div", { class: "panel" },
         h("h3", {}, "S-mode faces"),
         h("p", { class: "muted small" }, "Register portraits from static/img/faces. The generator only picks registered labels."),
@@ -261,6 +310,8 @@ export function adminView(root, ctx) {
         return [...new Set(Object.values(s))].join(" / ");
       };
       const chars = d.content?.surveillance?.characters || [];
+      const ad = d.content?.act_deceive?.buckets || {};
+      const adBits = Object.entries(ad).map(([b, s]) => `${b}: ${s.ready ? `ready (${s.count})` : "missing"}`);
       render(pipeline,
         h("h3", {}, "Content pipeline"),
         h("p", { class: "muted small" }, `Pools for ${d.date}. Gemini is used first; fallbacks keep the app playable.`),
@@ -275,7 +326,8 @@ export function adminView(root, ctx) {
         chars.length
           ? h("div", {}, h("p", { class: "muted small" }, "S-mode characters in today's pool:"),
               h("ul", { class: "small" }, ...chars.map((c) => h("li", {}, `${c.difficulty}: ${c.name} (${c.label})`))))
-          : h("p", { class: "muted small" }, "No S-mode characters yet. Use Generate -> Surveillance, or start a run to kick it."));
+          : h("p", { class: "muted small" }, "No S-mode characters yet. Use Generate -> Surveillance, or start a run to kick it."),
+          adBits.length ? h("p", { class: "muted small mono" }, "Act & Deceive — " + adBits.join(" · ")) : null);
       const pct = Math.min(100, (d.seats.used / d.seats.max) * 100);
       const seatBar = h("div", { class: "seatbar", role: "img", "aria-label": `${d.seats.used} of ${d.seats.max} seats used` }, h("span", { class: "seatbar__fill" }));
       seatBar.firstChild.style.setProperty("--w", pct + "%");
@@ -301,5 +353,6 @@ export function adminView(root, ctx) {
   loadFaces();
   loadJobs(1);
   loadLogs(1);
+  loadMetrics();
   return () => { clearInterval(jobsPoll); clearInterval(jobsTick); };
 }

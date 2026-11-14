@@ -54,12 +54,12 @@ export const DARK = [
     score: "Dark points only — never your streak, leaderboard or normal score." },
   { id: "act_deceive", label: "Act & Deceive", tagline: "Hold a cover identity under scrutiny.",
     dark: true,
-    what: "You're performing a cover identity at a fictional gathering. Observers probe you and compare notes; convince them you belong.",
-    how: ["Study 3 topics before you enter — you can't know everything.",
-          "Answers are moves: commit (a fact), evade (a non-answer), risk (a bold claim that can lower doubt), or redirect (turn it back).",
-          "A claim you can't back is a bluff — a later observer will check it."],
-    win: ["Keep the doubt meter under 5 and convince most of the room.",
-          "Bold moves are the only way to reduce doubt — but they can backfire."],
+    what: "You're performing a cover identity at a fictional gathering. You're handed your role and a few facts you actually know; the rest you can only fake. Observers probe you and later compare notes.",
+    how: ["In the lobby you see your role, the glimpses you were given, and who's watching. There's nothing to study — play what you know.",
+          "Each turn offers four moves: assert a fact you know, deflect, stand by what you already said, or overreach (confidently claim a detail you were never given).",
+          "An overreach buys credibility now but is a debt — a different observer calls it in later. Contradicting your own earlier claim is the loudest tell."],
+    win: ["Keep the doubt meter under 5, convince most of the room, and let nothing be called in.",
+          "A lucky overreach that happens to be true lowers doubt — but you won't know which ones are."],
     score: "Dark points only; separate from Surveillance and from the gym." },
 ];
 

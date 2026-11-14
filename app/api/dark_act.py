@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.rate_limit import rate_limit
 from app.core.security import get_profiled_user
-from app.models.schemas import ActPrepIn, DarkChooseIn, DarkStartIn
+from app.models.schemas import DarkChooseIn, DarkStartIn
 from app.services import session_service as svc
 
 router = APIRouter(prefix="/api/dark/act", tags=["dark"])
@@ -11,12 +11,12 @@ router = APIRouter(prefix="/api/dark/act", tags=["dark"])
 @router.post("/start", status_code=201)
 async def start(body: DarkStartIn, user: dict = Depends(get_profiled_user)):
     rate_limit("dark-start", str(user["_id"]), 40, 3600)
-    return svc.act_public(await svc.create_act(user, body.difficulty, None))
+    return svc.act_public(await svc.create_act(user, body.difficulty, body.settings))
 
 
-@router.post("/{sid}/prep")
-async def prep(sid: str, body: ActPrepIn, user: dict = Depends(get_profiled_user)):
-    return svc.act_public(await svc.act_prep(user, sid, body.topic_ids))
+@router.post("/{sid}/play")
+async def play(sid: str, user: dict = Depends(get_profiled_user)):
+    return svc.act_public(await svc.act_play(user, sid))
 
 
 @router.get("/{sid}")

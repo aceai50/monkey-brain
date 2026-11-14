@@ -7,6 +7,7 @@
   retries are harmless. Everything is scoped by user_id taken from the JWT (no IDOR).
 """
 from datetime import datetime, timedelta, timezone
+import copy
 import uuid
 
 from bson import ObjectId
@@ -516,8 +517,18 @@ def _act_settings(raw) -> dict:
     raw = raw or {}
     timer = raw.get("timer") or {}
     preset = timer.get("preset") if timer.get("preset") in ACT_PRESETS else "normal"
-    return {"enabled": bool(timer.get("enabled")), "preset": preset, "seconds": ACT_PRESETS[preset],
-            "show_improvised": bool(raw.get("show_improvised", True))}
+    secs = timer.get("seconds")
+    seconds = int(secs) if isinstance(secs, (int, float)) and 5 <= int(secs) <= 120 else ACT_PRESETS[preset]
+    return {"enabled": bool(timer.get("enabled")), "preset": preset, "seconds": seconds,
+            "show_debts": bool(raw.get("show_debts", True))}
+
+
+def _act_run_settings(act: dict) -> dict:
+    timer = act.get("timer") or {}
+    preset = timer.get("preset", "normal")
+    return {"enabled": bool(timer.get("enabled")), "preset": preset,
+            "seconds": timer.get("seconds", ACT_PRESETS.get(preset, 20)),
+            "show_debts": act.get("show_debts", act.get("show_improvised", True))}
 
 
 async def _face_url(label: str) -> str:
@@ -532,75 +543,105 @@ def _act_deadline(act: dict):
     return None
 
 
+def _act_option_public(op: dict, key: int) -> dict:
+    return {"key": str(key), "text": op.get("text", ""), "tag": op.get("tag") or "?"}
+
+
+def _act_claims_view(act: dict, reveal: bool) -> list[dict]:
+    out = []
+    for fid, c in (act.get("claims") or {}).items():
+        entry = {"fact": fid, "value": c.get("value"), "to": c.get("to"), "settled": bool(c.get("checked"))}
+        if reveal and c.get("checked"):
+            entry["exposed"] = bool(c.get("exposed"))
+        out.append(entry)
+    return out
+
+
+def _act_is_legacy(sc) -> bool:
+    return not (isinstance(sc, dict) and sc.get("version") == act_deceive.VERSION
+                and sc.get("facts") and sc.get("role"))
+
+
+def _legacy_act_report(s: dict) -> dict:
+    act, sc = s.get("act") or {}, s.get("scenario") or {}
+    cover = sc.get("cover") or {}
+    return {
+        "mode": "dark", "pillar": ACT_PILLAR, "outcome": "partial", "dark_points": 0,
+        "doubt_left": int(act.get("doubt", 0) or 0), "max_doubt": act_deceive.MAX_DOUBT,
+        "turns": int(sc.get("turns", 0) or 0), "wasted": 0, "exposed": 0, "caught": [],
+        "role": cover.get("role") or sc.get("role") or "your cover",
+        "setting": cover.get("setting") or sc.get("setting") or "",
+        "verdicts": [], "commitments": [], "log": [],
+        "note": "This scene predates the Act & Deceive update and can't continue — start a fresh one.",
+    }
+
+
 def act_public(s: dict) -> dict:
     act = s["act"]
     sc = s["scenario"]
+    timer = act.get("timer") or {"enabled": False, "preset": "normal", "seconds": 0}
+    phase = "lobby" if act.get("phase") == "prep" else act.get("phase", "scene")
     out = {
         "id": str(s["_id"]), "mode": "dark", "pillar": ACT_PILLAR, "state": s["state"],
-        "phase": act["phase"], "difficulty": s["difficulty"], "turns": sc["turns"],
+        "phase": phase, "difficulty": s["difficulty"], "turns": sc.get("turns", 0),
         "max_doubt": act_deceive.MAX_DOUBT, "image_url": s.get("image_url"),
         "pool_size": int(s.get("pool_size") or 1), "can_skip": int(s.get("pool_size") or 1) > 1,
         "stack_index": int(s.get("stack_index") or 0),
         "can_next": int(s.get("stack_index") or 0) < int(s.get("pool_size") or 1) - 1,
         "can_prev": int(s.get("stack_index") or 0) > 0,
-        "show_improvised": act["show_improvised"],
-        "timer": {"enabled": act["timer"]["enabled"], "preset": act["timer"]["preset"],
-                  "seconds": act["timer"]["seconds"]},
+        "show_debts": act.get("show_debts", act.get("show_improvised", True)),
+        "timer": {"enabled": timer["enabled"], "preset": timer["preset"], "seconds": timer["seconds"]},
         "outcome": act.get("outcome"), "server_now": now_utc().isoformat(),
     }
-    if act["timer"]["enabled"] and act.get("deadline_at"):
+    if timer["enabled"] and act.get("deadline_at"):
         left = max(0.0, (aware(act["deadline_at"]) - now_utc()).total_seconds())
         out["timer"]["seconds_left"] = round(left, 1)
-    if act["phase"] == "prep":
+    if phase == "lobby":
         out.update({
-            "cover": sc["cover"],
+            "role": sc.get("role", ""), "setting": sc.get("setting", ""),
             "cast": [{"id": c["id"], "name": c["name"], "role": c["role"], "hint": c["hint"],
-                      "image_url": s.get("cast_media", {}).get(c["id"])} for c in sc["cast"]],
-            "topics": sc["topics"], "prep_cards": sc["prep_cards"],
-            "tags": sc["tags"], "pick": act_deceive.PREP_PICK,
+                      "image_url": s.get("cast_media", {}).get(c["id"])} for c in sc.get("cast", [])],
+            "glimpses": sc.get("glimpses", []),
+            "commitments": _act_claims_view(act, out["show_debts"]),
         })
         return out
-    if act["phase"] == "finished":
+    if phase == "finished":
         out["node"] = None
         out["report"] = s.get("report")
         return out
     node = sc["nodes"][act["node_id"]]
-    cast = {c["id"]: c for c in sc["cast"]}
+    cast = {c["id"]: c for c in sc.get("cast", [])}
     speaker = cast.get(node.get("speaker")) or {}
-    order = act["order"].get(node["id"]) or list(range(len(node["options"])))
+    order = act.get("order", {}).get(node["id"]) or list(range(len(node["options"])))
     out.update({
-        "doubt": act["doubt"], "turn": act["turn"],
+        "doubt": act.get("doubt", 0), "turn": act.get("turn", 0),
         "cast": [{"id": c["id"], "name": c["name"], "role": c["role"],
                   "image_url": s.get("cast_media", {}).get(c["id"]),
-                  "speaking": c["id"] == node.get("speaker")} for c in sc["cast"]],
+                  "speaking": c["id"] == node.get("speaker")} for c in sc.get("cast", [])],
         "node": {"speaker": speaker.get("name"), "speaker_id": node.get("speaker"),
                  "line": node["line"],
-                 "options": [{"key": str(i), "text": node["options"][i]["text"],
-                              "tag": node["options"][i]["tag"],
-                              "topic_chip": (next((t["name"] for t in sc["topics"]
-                                                   if t["id"] == node["options"][i]["topic"]), None)
-                                             if node["options"][i]["topic"] in act["studied"] else None)}
-                             for i in order]},
-        "ledger": [{"text": e["text"], "to": e["to"],
-                    "improvised": e["improvised"] if act["show_improvised"] else None}
-                   for e in act["ledger"].values()],
-        "caught": len(act["caught"]),
+                 "options": [_act_option_public(node["options"][i], i) for i in order]},
+        "commitments": _act_claims_view(act, out["show_debts"]),
+        "caught": len(act.get("caught", [])),
     })
-    out["transcript"] = _act_transcript(act["log"])
+    out["transcript"] = _act_transcript(act.get("log", []))
     return out
 
 
 def _act_transcript(log: list[dict]) -> list[dict]:
-    """Replay the scene as chat: their line -> your pick -> their reaction."""
+    """Replay the scene as chat: their line -> your pick -> their reaction; checks are call-ins."""
     out: list[dict] = []
     for e in log:
-        if e.get("check"):
+        if e.get("stammer"):
+            out.append({"role": "system", "text": "You hesitated too long."})
+        elif e.get("kind") == "end":
+            if e.get("line"):
+                out.append({"role": "them", "speaker": "", "text": e["line"]})
+        elif e.get("kind") == "check":
             if e.get("line"):
                 out.append({"role": "them", "speaker": e.get("speaker", ""), "text": e["line"]})
             if e.get("text"):
                 out.append({"role": "them", "speaker": e.get("speaker", ""), "text": e["text"]})
-        elif e.get("stammer"):
-            out.append({"role": "system", "text": "You hesitated too long."})
         elif e.get("chosen") is not None:
             out.append({"role": "them", "speaker": e.get("speaker", ""), "text": e.get("line", "")})
             out.append({"role": "me", "text": e["chosen"]})
@@ -612,21 +653,22 @@ def _act_transcript(log: list[dict]) -> list[dict]:
 async def _create_act_with(user: dict, bucket: str, sc: dict, pool_size: int, settings: dict,
                            attempt: int = 1, stack_index: int = 0) -> dict:
     db = get_db()
-    cast_media = {c["id"]: await _face_url(c.get("image_label") or sc["image_label"]) for c in sc["cast"]}
+    first = (sc["cast"][0].get("image_label") if sc["cast"] else "") or "male_1"
+    cast_media = {c["id"]: await _face_url(c.get("image_label") or first) for c in sc["cast"]}
     seed = uuid.uuid4().hex
     order = {nid: HashRng("act", seed, nid).shuffle(list(range(len(n["options"]))))
              for nid, n in sc["nodes"].items() if n.get("kind") == "scene"}
     doc = {
         "_id": ObjectId(), "user_id": user["_id"], "date": today_ist(), "mode": "dark", "pillar": ACT_PILLAR,
         "difficulty": bucket, "state": "active", "scenario": sc,
-        "image_url": await _face_url(sc["image_label"]), "cast_media": cast_media,
+        "image_url": await _face_url(first), "cast_media": cast_media,
         "pool_size": pool_size, "stack_index": stack_index,
-        "act": {"phase": "prep", "studied": [], "doubt": 0, "vague_streak": 0, "vague_count": 0,
-                "turn": 0, "node_id": "n1", "ledger": {}, "caught": [], "wasted": 0, "log": [],
+        "act": {"phase": "lobby", "doubt": 0, "turn": 0, "vague_streak": 0,
+                "node_id": "n1", "claims": {}, "caught": [], "wasted": 0, "log": [],
                 "suspicion": {c["id"]: 0 for c in sc["cast"]},
                 "timer": {"enabled": settings["enabled"], "preset": settings["preset"],
                           "seconds": settings["seconds"]},
-                "show_improvised": settings["show_improvised"], "deadline_at": None,
+                "show_debts": settings["show_debts"], "deadline_at": None,
                 "attempt": attempt, "seed": seed, "order": order, "outcome": None},
         "created_at": now_utc(), "finished_at": None, "report": None,
     }
@@ -639,7 +681,7 @@ async def create_act(user: dict, difficulty: str, settings: dict | None = None) 
     active = await db.sessions.find_one({"user_id": user["_id"], "mode": "dark",
                                          "pillar": ACT_PILLAR, "state": "active"})
     if active is not None:
-        return active
+        return await get_act(user, str(active["_id"]))
     bucket = difficulty if difficulty in DARK_BUCKETS else "medium"
     stack = await content.dark_stack(ACT_PILLAR, bucket)
     if not stack:
@@ -663,8 +705,7 @@ async def act_step(user: dict, sid: str, direction: str) -> dict:
         raise HTTPException(409, "No more scenarios in this set")
     await get_db().sessions.delete_one(
         {"_id": s["_id"], "user_id": user["_id"], "mode": "dark", "pillar": ACT_PILLAR, "state": "active"})
-    settings = {"enabled": s["act"]["timer"]["enabled"], "preset": s["act"]["timer"]["preset"],
-                "seconds": s["act"]["timer"]["seconds"], "show_improvised": s["act"]["show_improvised"]}
+    settings = _act_run_settings(s["act"])
     return await _create_act_with(user, bucket, stack[ni]["scenario"], total, settings, stack_index=ni)
 
 
@@ -674,6 +715,18 @@ async def get_act(user: dict, sid: str) -> dict:
         {"_id": oid, "user_id": user["_id"], "mode": "dark", "pillar": ACT_PILLAR})
     if s is None:
         raise HTTPException(404, "Session not found")
+    if s["state"] == "active" and _act_is_legacy(s.get("scenario")):
+        act = s["act"]
+        act["phase"] = "finished"
+        act["outcome"] = "partial"
+        rep = _legacy_act_report(s)
+        await get_db().sessions.update_one(
+            {"_id": s["_id"]}, {"$set": {"state": "finished", "finished_at": now_utc(),
+                                         "act": act, "report": rep}})
+        s["state"] = "finished"
+        s["act"] = act
+        s["report"] = rep
+        return s
     if s["state"] == "active":
         stack = await content.dark_stack(ACT_PILLAR, s["difficulty"])
         n = len(stack)
@@ -683,21 +736,15 @@ async def get_act(user: dict, sid: str) -> dict:
     return s
 
 
-async def act_prep(user: dict, sid: str, topic_ids: list[str]) -> dict:
+async def act_play(user: dict, sid: str) -> dict:
+    """Leave the lobby and open the scene. No cram — the role and glimpses are all you get."""
     s = await get_act(user, sid)
-    if s["state"] != "active" or s["act"]["phase"] != "prep":
-        raise HTTPException(409, "This run is not in prep")
-    sc = s["scenario"]
-    picked = [str(t) for t in topic_ids]
-    allowed = set(sc["prep_cards"])
-    if (len(set(picked)) != act_deceive.PREP_PICK or len(picked) != act_deceive.PREP_PICK
-            or not set(picked) <= allowed):
-        raise HTTPException(400, f"Pick exactly {act_deceive.PREP_PICK} topics")
+    if s["state"] != "active" or s["act"]["phase"] != "lobby":
+        raise HTTPException(409, "This run is not in the lobby")
     act = s["act"]
-    act.update({"phase": "scene", "studied": picked, "node_id": "n1", "turn": 0,
-                "deadline_at": _act_deadline(act)})
+    act.update({"phase": "scene", "node_id": "n1", "turn": 0, "deadline_at": _act_deadline(act)})
     await get_db().sessions.update_one(
-        {"_id": s["_id"], "user_id": user["_id"], "act.phase": "prep"},
+        {"_id": s["_id"], "user_id": user["_id"], "act.phase": "lobby"},
         {"$set": {"act": act}})
     s["act"] = act
     return s
@@ -712,23 +759,23 @@ def _finish_act(act: dict, sc: dict) -> dict:
 
 def _act_report(s: dict, fin: dict) -> dict:
     act, sc = s["act"], s["scenario"]
-    committed = list(act["ledger"].values())
-    survived = sum(1 for e in committed if e.get("survived") is True)
+    cast = {c["id"]: c for c in sc["cast"]}
+    claims = list(act["claims"].values())
+    exposed = fin["exposed"]
     composure = (act_deceive.MAX_DOUBT - act["doubt"]) / act_deceive.MAX_DOUBT
     convinced = fin["bought"] / max(1, len(sc["cast"]))
-    survived_bluffs = survived / max(1, len(committed))
+    clean = 1.0 if exposed == 0 else max(0.0, 1 - exposed / max(1, len(claims)))
     efficiency = max(0.0, 1 - act["wasted"] / max(1, sc["turns"]))
-    score = round(100 * (0.4 * composure + 0.3 * convinced + 0.2 * survived_bluffs + 0.1 * efficiency))
-    cast = {c["id"]: c for c in sc["cast"]}
+    score = round(100 * (0.4 * composure + 0.3 * convinced + 0.2 * clean + 0.1 * efficiency))
     return {
         "mode": "dark", "pillar": ACT_PILLAR, "outcome": act["outcome"], "dark_points": score,
         "doubt_left": act["doubt"], "max_doubt": act_deceive.MAX_DOUBT, "turns": sc["turns"],
-        "wasted": act["wasted"], "cover": sc["cover"],
+        "wasted": act["wasted"], "exposed": exposed, "caught": list(act["caught"]),
+        "role": sc["role"], "setting": sc["setting"],
         "verdicts": [{"id": cid, "name": cast[cid]["name"], "band": band,
                       "line": (sc["verdicts"].get(cid) or {}).get(band, "")}
                      for cid, band in fin["verdicts"].items()],
-        "ledger": [{"text": e["text"], "to": e["to"], "improvised": e["improvised"],
-                    "survived": e.get("survived")} for e in committed],
+        "commitments": _act_claims_view(act, True),
         "log": act["log"],
     }
 
@@ -747,39 +794,35 @@ async def act_choose(user: dict, sid: str, key: str) -> dict:
         raise HTTPException(400, "Bad option")
     option = node["options"][oi]
     cast = {c["id"]: c for c in sc["cast"]}
-    ctx = {"studied": set(act["studied"]), "vague_streak": act["vague_streak"],
-           "speaker": node.get("speaker"),
-           "personality": (cast.get(node.get("speaker")) or {}).get("personality"),
-           "ledger": act["ledger"], "turn": act["turn"], "doubt": act["doubt"]}
     options_view, ideal_i, best = [], None, None
     for i, cand in enumerate(node["options"]):
-        works = act_deceive.eval_cond(cand["works_if"], ctx)
-        options_view.append({"tag": cand["tag"], "text": cand["text"],
-                             "rationale": cand["rationale"], "works": works})
-        if works and (best is None or cand["doubt_on_success"] < best):
-            best, ideal_i = cand["doubt_on_success"], i
-    better = node["options"][ideal_i]["text"] if ideal_i is not None else None
+        proj = copy.deepcopy(act)
+        act_deceive.apply_option(proj, sc, node, cand)
+        d = proj["doubt"] - act["doubt"]
+        options_view.append({"tag": cand.get("tag") or cand["kind"], "text": cand.get("text", ""),
+                             "kind": cand["kind"], "delta": d})
+        if best is None or d < best:
+            best, ideal_i = d, i
+    better = node["options"][ideal_i].get("text") if ideal_i is not None else None
     reaction = act_deceive.apply_option(act, sc, node, option)
-    if not reaction["ok"]:
+    if reaction["delta"] > 0:
         act["wasted"] += 1
-    for cid in option.get("commits") or []:
-        act["ledger"][cid]["text"] = option["text"]
-        act["ledger"][cid]["to"] = cast[node["speaker"]]["name"] if node.get("speaker") in cast else "the room"
     act["log"].append({
-        "turn": act["turn"], "node": node["id"],
+        "turn": act["turn"], "node": node["id"], "kind": "scene",
         "speaker": cast.get(node.get("speaker"), {}).get("name", ""), "line": node["line"],
-        "chosen": option["text"], "tag": option["tag"], "ok": reaction["ok"],
+        "chosen": option.get("text", ""), "tag": option.get("tag") or option["kind"],
+        "optkind": option["kind"], "result": reaction["result"], "ok": reaction["ok"],
         "delta": reaction["delta"], "doubt_after": act["doubt"], "better": better,
-        "rationale": option["rationale"], "ideal": ideal_i, "options": options_view,
-        "reaction": reaction["line"],
+        "ideal": ideal_i, "options": options_view, "reaction": reaction["line"],
     })
     nxt = node["next"]
     while nxt and sc["nodes"][nxt]["kind"] == "check":
         chk = sc["nodes"][nxt]
         res = act_deceive.run_check(act, chk)
-        act["log"].append({"turn": act["turn"], "node": chk["id"], "check": True,
+        act["log"].append({"turn": act["turn"], "node": chk["id"], "kind": "check",
                            "speaker": cast.get(chk.get("speaker"), {}).get("name", ""),
-                           "line": chk["line"], "text": res["line"], "caught": res["caught"],
+                           "fact": chk.get("fact"), "line": chk["line"], "text": res["line"],
+                           "result": res["result"], "caught": res["caught"],
                            "doubt_after": act["doubt"]})
         nxt = chk["next"]
     fin = None
@@ -787,12 +830,13 @@ async def act_choose(user: dict, sid: str, key: str) -> dict:
         fin = _finish_act(act, sc)
     elif not nxt or sc["nodes"][nxt]["kind"] == "end":
         if nxt:
-            act["log"].append({"turn": act["turn"], "node": nxt, "check": False,
+            act["log"].append({"turn": act["turn"], "node": nxt, "kind": "end",
                                "speaker": "", "line": sc["nodes"][nxt]["line"], "text": "",
-                               "caught": [], "doubt_after": act["doubt"]})
+                               "result": "end", "caught": [], "doubt_after": act["doubt"]})
         fin = _finish_act(act, sc)
     else:
         act["node_id"] = nxt
+        act["turn"] += 1
         act["deadline_at"] = _act_deadline(act)
     sets = {"act": act}
     if fin is not None:
@@ -813,9 +857,10 @@ async def act_timeout(user: dict, sid: str) -> dict:
     act = s["act"]
     act["doubt"] = min(act_deceive.MAX_DOUBT, act["doubt"] + 1)
     act["vague_streak"] += 1
-    act["log"].append({"turn": act["turn"], "node": act["node_id"], "stammer": True,
-                       "speaker": "", "line": "…", "text": "You hesitated too long.",
-                       "caught": [], "doubt_after": act["doubt"]})
+    act["wasted"] += 1
+    act["log"].append({"turn": act["turn"], "node": act["node_id"], "kind": "scene", "stammer": True,
+                       "speaker": "", "line": "…", "chosen": None, "text": "You hesitated too long.",
+                       "result": "stammer", "caught": [], "doubt_after": act["doubt"]})
     fin = None
     if act["doubt"] >= act_deceive.MAX_DOUBT:
         fin = _finish_act(act, s["scenario"])
@@ -839,8 +884,7 @@ async def act_restart(user: dict, sid: str) -> dict:
     s = await get_act(user, sid)
     if s["state"] == "active":
         raise HTTPException(409, "Finish the current scene first")
-    settings = {"enabled": s["act"]["timer"]["enabled"], "preset": s["act"]["timer"]["preset"],
-                "seconds": s["act"]["timer"]["seconds"], "show_improvised": s["act"]["show_improvised"]}
+    settings = _act_run_settings(s["act"])
     return await create_act(user, s["difficulty"], settings)
 
 
@@ -865,7 +909,7 @@ async def dark_pillars_payload(user: dict) -> dict:
             {"id": str(s["_id"]), "phase": (s.get("act") or {}).get("phase") or "active"})
     return {
         "pillars": [{"id": pid, "label": meta["label"], "difficulty": meta["difficulty"],
-                     "settings": ({"timer": list(ACT_PRESETS), "ledger": True}
+                     "settings": ({"timer": list(ACT_PRESETS), "custom_seconds": True, "debts": True}
                                   if pid == ACT_PILLAR else {})}
                     for pid, meta in DARK_PILLARS.items()],
         "active": by_pillar,

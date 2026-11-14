@@ -14,9 +14,10 @@ from pathlib import Path
 
 import httpx
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.core.config import settings
+from app.services import observability
 
 log = logging.getLogger("gemini")
 _env = Environment(loader=FileSystemLoader(Path(__file__).resolve().parent.parent / "prompts"),
@@ -146,10 +147,11 @@ class _SurvBatch(BaseModel):
     items: list[_SurvItem]
 
 
-class _ActCover(BaseModel):
-    role: str
-    setting: str
-    brief: str
+class _ActFact(BaseModel):
+    id: str
+    true_value: str
+    glimpsed: bool = False
+    glimpse: str = ""
 
 
 class _ActCastMember(BaseModel):
@@ -161,70 +163,53 @@ class _ActCastMember(BaseModel):
     hint: str
 
 
-class _ActTopic(BaseModel):
-    id: str
-    name: str
-    study_card: str
-
-
 class _ActPreview(BaseModel):
-    image_label: str
-    cover: _ActCover
+    role: str
+    setting: str
+    facts: list[_ActFact]
     cast: list[_ActCastMember]
-    topics: list[_ActTopic]
-    prep_cards: list[str]
     tags: list[str]
 
 
 class _Atom(BaseModel):
-    studied: str | None = None
-    not_studied: str | None = None
-    vague_streak_lt: int | None = None
+    glimpsed: str | None = None
+    claimed: str | None = None
+    not_claimed: str | None = None
     target: str | None = None
     target_personality: str | None = None
-    claim_present: str | None = None
-    claim_absent: str | None = None
     turn_lt: int | None = None
     doubt_lt: int | None = None
+    vague_streak_lt: int | None = None
 
 
 class _ActOptionIn(BaseModel):
-    text: str
-    tag: str
     kind: str
-    topic: str | None = None
-    commits: list[str] = []
+    tag: str
+    text: str
+    fact: str | None = None
+    value: str | None = None
     works_if: list[_Atom] = []
     doubt_on_success: int = 0
     doubt_on_fail: int = 1
     line_if_pass: str
     line_if_fail: str
-    rationale: str
+    rationale: str = ""
+
+    @field_validator("works_if", mode="before")
+    @classmethod
+    def _coerce_atoms(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, dict):
+            return [v] if v else []
+        return v
 
 
 class _ActNodeIn(BaseModel):
     id: str
-    kind: str = "scene"
-    speaker: str | None = None
+    speaker: str
     line: str
-    next: str | None = None
-    options: list[_ActOptionIn] = []
-    claims: list[str] = []
-    bluff_line: str | None = None
-    confirm_line: str | None = None
-    penalty: int = 1
-
-
-class _ActVerdict(BaseModel):
-    id: str
-    bought_it: str
-    suspicious: str
-    sees_through: str
-
-
-class _ActScriptIn(BaseModel):
-    nodes: list[_ActNodeIn]
-    verdicts: list[_ActVerdict]
+    options: list[_ActOptionIn]
 
 
 class _ActSceneChunk(BaseModel):
@@ -233,11 +218,18 @@ class _ActSceneChunk(BaseModel):
 
 class _ActCheckIn(BaseModel):
     speaker: str
-    claims: list[str]
+    fact: str
     line: str
-    bluff_line: str
-    confirm_line: str
+    exposed_line: str
+    held_line: str
     penalty: int = 1
+
+
+class _ActVerdict(BaseModel):
+    id: str
+    bought_it: str
+    suspicious: str
+    sees_through: str
 
 
 class _ActChecks(BaseModel):
@@ -302,6 +294,10 @@ async def _gemini_once(model: str, prompt: str, schema, temperature: float) -> d
         ),
         timeout=settings.gemini_call_timeout_s,
     )
+    um = getattr(resp, "usage_metadata", None)
+    if um is not None:
+        observability.record_tokens(getattr(um, "prompt_token_count", None),
+                                    getattr(um, "candidates_token_count", None))
     return json.loads(resp.text)
 
 
@@ -343,7 +339,10 @@ async def _groq_once(model: str, prompt: str, schema, temperature: float) -> dic
                 raise AIGenerationError(f"groq {model}: JSON generation failed: {body}")
             raise AIBlockedError(f"groq {model}: {r.status_code} {body}")
         raise RuntimeError(f"groq {model}: {r.status_code} {body}")
-    content = _strip_fence(r.json()["choices"][0]["message"]["content"])
+    payload_json = r.json()
+    usage = payload_json.get("usage") or {}
+    observability.record_tokens(usage.get("prompt_tokens"), usage.get("completion_tokens"))
+    content = _strip_fence(payload_json["choices"][0]["message"]["content"])
     return schema.model_validate(json.loads(content)).model_dump()
 
 
@@ -361,15 +360,21 @@ async def _groq_call(model: str, prompt: str, schema, temperature: float) -> dic
 
 
 async def _call(model: str, prompt: str, schema, temperature: float) -> dict:
-    """Gemini first, then Groq (primary model, then its fallback model)."""
+    """Gemini first, then Groq (primary model, then its fallback model). Each attempt is timed and
+    recorded for observability (provider, model, latency, success/failure, error class)."""
     errors: list[Exception] = []
     if settings.gemini_api_key and not _spent("gemini"):
         for attempt in range(2):
+            t0 = time.monotonic()
             try:
                 out = await _gemini_once(model, prompt, schema, temperature)
+                observability.record_call("gemini", model, (time.monotonic() - t0) * 1000, True,
+                                          attempt=attempt)
                 _last_ai.set({"provider": "gemini", "model": model})
                 return out
             except Exception as e:  # noqa: BLE001
+                observability.record_call("gemini", model, (time.monotonic() - t0) * 1000, False,
+                                          error=str(e), attempt=attempt)
                 if _is_quota(e):
                     _mark_spent("gemini", 6 * 3600)
                     log.warning("Gemini quota exhausted; switching to Groq for a while")
@@ -384,23 +389,29 @@ async def _call(model: str, prompt: str, schema, temperature: float) -> dict:
         key = f"groq:{m}"
         if not settings.groq_api_key or _spent(key):
             continue
+        t0 = time.monotonic()
         try:
             out = await _groq_call(m, prompt, schema, temperature)
+            observability.record_call("groq", m, (time.monotonic() - t0) * 1000, True)
             _last_ai.set({"provider": "groq", "model": m})
             return out
         except AIQuotaError as e:
+            observability.record_call("groq", m, (time.monotonic() - t0) * 1000, False, error=str(e))
             _mark_spent(key, e.retry_after)   # cool down, then we may try this model again
             errors.append(e)
             log.warning("Groq %s rate-limited; cooling down %.0fs", m, e.retry_after)
         except AIBlockedError as e:
+            observability.record_call("groq", m, (time.monotonic() - t0) * 1000, False, error=str(e))
             _mark_spent(key, 3600)            # bad request/permission: stop calling this model
             errors.append(e)
             log.warning("Groq %s rejected the request; disabling it for an hour: %s", m, e)
         except AIGenerationError as e:
+            observability.record_call("groq", m, (time.monotonic() - t0) * 1000, False, error=str(e))
             _mark_spent(key, 30)              # transient truncation: short pause, then other model
             errors.append(e)
             log.warning("Groq %s produced invalid JSON; trying the next model: %s", m, e)
         except Exception as e:  # noqa: BLE001
+            observability.record_call("groq", m, (time.monotonic() - t0) * 1000, False, error=str(e))
             if _is_quota(e):
                 _mark_spent(key, 120)
             errors.append(e)
@@ -432,23 +443,26 @@ async def generate_surveillance_items(level_name: str, level_desc: str, n: int, 
 
 
 async def generate_act_cast(level_name: str, level_desc: str, avoid: list[str], labels: list[str],
-                            cast_size: int, topics_count: int, prep_count: int) -> dict:
+                            cast_size: int, facts_count: int, glimpsed_count: int) -> dict:
     prompt = _env.get_template("act_cast.j2").render(
         level_name=level_name, level_desc=level_desc, avoid=", ".join(avoid) or "none",
         labels=", ".join(labels) or "student_1, boss_1, owner_1",
-        cast_size=cast_size, topics_count=topics_count, prep_count=prep_count)
+        cast_size=cast_size, facts_count=facts_count, glimpsed_count=glimpsed_count)
     return await _call(settings.gemini_model, prompt, _ActPreview, 1.0)
 
 
 async def generate_act_scene_chunk(preview: dict, level_name: str, count: int,
-                                   prior_lines: list[str], used_topics: set[str]) -> dict:
+                                   prior_lines: list[str], used_facts: set[str]) -> dict:
     """One small piece of the scene. The caller concatenates the nodes and chains them."""
     cast = "\n".join(f"{c['id']} | {c['name']} | {c['personality']} | {c['role']}"
                      for c in preview.get("cast", []))
-    topics = ", ".join(f"{t['id']} | {t['name']}" for t in preview.get("topics", []))
+    facts = "\n".join(f"{f['id']} | true: {f['true_value']} | "
+                      f"{'glimpsed' if f.get('glimpsed') else 'unknown'}"
+                      for f in preview.get("facts", []))
     prompt = _env.get_template("act_scene_chunk.j2").render(
-        cast=cast, topics=topics, tags=", ".join(preview.get("tags", [])),
-        used=", ".join(sorted(used_topics)) or "none",
+        role=preview.get("role", ""), setting=preview.get("setting", ""),
+        cast=cast, facts=facts, tags=", ".join(preview.get("tags", [])),
+        used=", ".join(sorted(used_facts)) or "none",
         prior="\n".join(prior_lines) or "(the scene has just begun)",
         count=count)
     return await _call(settings.gemini_model, prompt, _ActSceneChunk, 0.9)
@@ -456,12 +470,14 @@ async def generate_act_scene_chunk(preview: dict, level_name: str, count: int,
 
 async def generate_act_checks(preview: dict, scene_nodes: list[dict], level_name: str) -> dict:
     cast = "\n".join(f"{c['id']} | {c['name']} | {c['personality']}" for c in preview.get("cast", []))
-    claims = [f"{cid} (node {n.get('id')})"
-              for n in scene_nodes
-              for o in (n.get("options") or [])
-              for cid in (o.get("commits") or [])]
+    debts = [f"{o.get('fact')} ({o.get('value')}) — overreach at node {n.get('id')}, "
+             f"must be checked by a DIFFERENT speaker later"
+             for n in scene_nodes
+             for o in (n.get("options") or [])
+             if o.get("kind") == "overreach" and o.get("fact")]
     prompt = _env.get_template("act_checks.j2").render(
-        cast=cast, claims="\n".join(claims) or "none")
+        role=preview.get("role", ""), cast=cast,
+        debts="\n".join(debts) or "none")
     return await _call(settings.gemini_model, prompt, _ActChecks, 0.7)
 
 
